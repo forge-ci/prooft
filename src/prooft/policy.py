@@ -27,6 +27,7 @@ POLICY_FILE = "ci-attestations.yml"
 DEFAULT_MAX_AGE_HOURS = 24.0
 ECOSYSTEMS = ("rust", "python", "cpp", "general")
 FIDELITIES = ("native", "vm", "emulation")
+MODES = ("shadow", "enforce")  # shadow: an unattested push warns; enforce: the pre-push hook refuses it
 
 _GATE = re.compile(r"^(?P<eco>[a-z]+)/(?P<platform>[A-Za-z0-9_.-]+)/(?P<check>[a-z0-9][a-z0-9-]*)$")
 _JOB = re.compile(r"^[^/:]+:[^:]+$")
@@ -61,6 +62,7 @@ class Policy:
     jobs: dict[str, tuple[str, ...]]
     max_age_hours: dict[str, float] = field(default_factory=dict[str, float])
     source: str = POLICY_FILE
+    mode: str = "shadow"
 
     # ── loading ──────────────────────────────────────────────────────────
 
@@ -81,12 +83,16 @@ class Policy:
         if not isinstance(raw, dict):
             raise PolicyError([f"{source}: top level must be a mapping"])
         doc: dict[str, object] = raw  # pyright: ignore[reportUnknownVariableType]
-        unknown = set(doc) - {"version", "lanes", "gates", "jobs"}
+        unknown = set(doc) - {"version", "mode", "lanes", "gates", "jobs"}
         if unknown:
             problems.append(f"unknown top-level keys: {', '.join(sorted(unknown))}")
         if doc.get("version") != 1:
             problems.append("version must be 1")
 
+        mode = doc.get("mode", "shadow")
+        if mode not in MODES:
+            problems.append(f"mode must be one of {', '.join(MODES)}")
+        mode = str(mode)
         max_age: dict[str, float] = {}
         for lane, spec in _mapping(doc.get("lanes"), "lanes", problems).items():
             spec_map = _mapping(spec, f"lanes.{lane}", problems)
@@ -131,7 +137,7 @@ class Policy:
             jobs[job] = names
         if problems:
             raise PolicyError([f"{source}: {p}" for p in problems])
-        return cls(gates, jobs, max_age, source)
+        return cls(gates, jobs, max_age, source, mode)
 
     # ── queries ──────────────────────────────────────────────────────────
 

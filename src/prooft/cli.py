@@ -5,6 +5,8 @@
     prooft plan --base REV [--head REV] [--title T] [--fork] [--github-output]
     prooft queue --pr-head REV --queue-head REV --base REV
     prooft lanes                     list lanes and the gates each proves
+    prooft hook install [--force]    install the pre-push hook
+    prooft check-push                what the hook runs (git pre-push stdin)
 
 Exit codes: 0 ok, 1 a check failed / something must run, 2 usage or policy error.
 """
@@ -18,6 +20,7 @@ import os
 import sys
 
 import prooft
+from prooft import hook
 from prooft.policy import PolicyError
 from prooft.verify import Plan
 
@@ -87,7 +90,27 @@ def _cmd_plan(repo: prooft.Repo, args: argparse.Namespace) -> int:
     return 0
 
 
-COMMANDS = {"run": _cmd_run, "verify": _cmd_verify, "lanes": _cmd_lanes, "plan": _cmd_plan, "queue": _cmd_plan}
+def _cmd_hook(repo: prooft.Repo, args: argparse.Namespace) -> int:
+    print(f"installed {hook.install(repo, force=args.force)}")
+    return 0
+
+
+def _cmd_check_push(repo: prooft.Repo, _: argparse.Namespace) -> int:
+    result = hook.check_push(repo, sys.stdin)
+    for line in result.lines:
+        print(line, file=sys.stderr)
+    return 0 if result.ok else 1
+
+
+COMMANDS = {
+    "run": _cmd_run,
+    "verify": _cmd_verify,
+    "lanes": _cmd_lanes,
+    "plan": _cmd_plan,
+    "queue": _cmd_plan,
+    "hook": _cmd_hook,
+    "check-push": _cmd_check_push,
+}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -118,6 +141,14 @@ def _parser() -> argparse.ArgumentParser:
             p.add_argument("--queue-head", default="HEAD")
 
     sub.add_parser("lanes", help="list lanes and their gates")
+
+    p_hook = sub.add_parser("hook", help="install the pre-push hook")
+    p_hook.add_argument("action", choices=["install"])
+    p_hook.add_argument("--force", action="store_true", help="replace a custom hook (saved as pre-push.pre-prooft)")
+
+    p_check = sub.add_parser("check-push", help="pre-push check (reads git pre-push lines on stdin)")
+    p_check.add_argument("remote", nargs="?")
+    p_check.add_argument("url", nargs="?")
     return parser
 
 
