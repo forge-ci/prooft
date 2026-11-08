@@ -75,10 +75,19 @@ prooft verify [REV]            every gate's state on REV
 prooft plan --base REV         which jobs a PR run may skip  (--github-output, --json)
 prooft queue --base REV --pr-head REV [--queue-head REV]
 prooft lanes                   lanes and the gates each proves
+prooft hook install [--force]  pre-push hook: warn (shadow) or refuse (enforce) an unattested head
 ```
 
 `run` refuses a dirty tree, and refuses if the command changes tracked
 files or moves HEAD. Re-running a lane replaces only that lane's trailers.
+
+### Shadow or enforce
+
+Top-level `mode:` in the policy decides what the pre-push hook does with an
+unattested head. `shadow` (the default) warns and pushes: CI simply runs
+the jobs. `enforce` refuses the push. The strictest mode between the pushed
+commit and the remote tip (or the default branch, for a new branch) wins,
+so a branch cannot flip itself back to `shadow` to escape.
 
 ## Python API
 

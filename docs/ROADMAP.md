@@ -17,17 +17,17 @@ rebuilding PRs that were already proven.
 
 ## Next (0.2: dogfood + ci.yml compliance)
 
-1. **ci.yml compliance.** `ci.toml`, `ci-pre.yml`/`ci.yml` workflows, `ci-ok`
+1. [x] **ci.yml compliance.** (PR #2: precheck 0 violations.) `ci.toml`, `ci-pre.yml`/`ci.yml` workflows, `ci-ok`
    aggregator; `./ci.py precheck` green. Blockers found so far, filed as
    ci.yml retrospective items (see `docs/RETROSPECTIVE.md`):
    - no pure-Python profile (`github-action` is the nearest stand-in);
    - GEN-004 hard-requires `pylint`, rejecting basedpyright as the checker;
    - GEN-005 forbids bash entry points (fine: `ci.py` replaced them).
-2. **Dogfood.** prooft's own PRs carry prooft trailers; the hosted `verify`
+2. [x] **Dogfood.** (PR #3: hosted run skipped `fast` + `test-linux-x64`.) prooft's own PRs carry prooft trailers; the hosted `verify`
    job runs `prooft plan --github-output` and the lint/test jobs skip.
-3. **`prooft hook install`**: pre-push hook that warns (shadow) or refuses
+3. [x] **`prooft hook install`**: pre-push hook that warns (shadow) or refuses
    (enforce) an unattested head.
-4. **`mode = shadow | enforce`** in the policy.
+4. [x] **`mode: shadow | enforce`** in the policy, strictest-of (pushed, remote, default branch).
 
 ## Then (0.3: merge-queue speed)
 
