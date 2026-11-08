@@ -115,7 +115,7 @@ fork, title tag, policy edit, forged pass, queue credit and queue rerun.
 
 ## Status
 
-Alpha (0.1). Next: input-keyed lane proofs for queue groups whose tree
+Alpha (0.1). prooft's own PRs skip `fast` and `test-linux-x64` when their trailers prove them. Next: input-keyed lane proofs for queue groups whose tree
 differs from the PR head, and a `ci-lint` adapter. See
 [docs/ROADMAP.md](docs/ROADMAP.md).
 
