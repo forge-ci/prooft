@@ -1,7 +1,57 @@
 # ci.toml: prooft's CI contract, checked by ci-lint (forge-ci/ci.yml).
+# Nothing here generates YAML: it bounds what the workflows may do.
 schema  = 3
-profile = "github-action"   # closest existing non-Rust profile; ci.yml has no pure-Python profile yet
+profile = "github-action"   # nearest non-Rust profile: ci.yml has no pure-Python profile yet (docs/RETROSPECTIVE.md)
 linter  = "zackees/ci.yml@24362f3e60248ebe72ffd261e5585640228cbc5d"
 
 [platforms]
 linux-x64 = { target = "x86_64-unknown-linux-gnu", runs-on = "ubuntu-24.04", group = "linux" }
+
+[suites]
+unit = { run = "ci.py test", required = true }
+
+[flow.pr]
+platforms = ["linux-x64"]
+suites    = ["unit"]
+budget    = { critical-path = "5m" }
+
+[flow.main]
+extends = "pr"
+
+[tags]
+ci-full = { add = { platforms = "all" } }
+
+[cache]
+budget   = "200MB"
+write-on = ["main"]
+never    = ["wheels"]
+pr       = { mode = "none", families = [], max-per-pr = "0MB", budget = "0MB", trim = "on-close" }
+
+[cache.family]
+uv = { via = "setup-uv", max = "44MB", per = "platform" }
+
+[local]
+runner = "prooft"
+lanes  = ["fast", "test-linux-x64"]
+cache  = "none"
+
+[allow]
+workflows     = { "ci.yml" = ["pull_request", "merge_group", "push:main", "workflow_dispatch"], "ci-pre.yml" = ["workflow_call"] }
+actions       = ["actions/checkout", "astral-sh/setup-uv"]
+setup-uv      = { require = { save-cache = "false" } }
+tools         = ["uv", "python3", "git"]
+permissions   = { "actions: write" = ["cache-janitor"] }
+secrets       = []
+platform-code = ["src/prooft/platforms/**"]
+platform-selector = ""
+setup-soldr   = { only-in = ".github/actions/soldr" }   # unused: prooft builds no Rust
+
+[publish]
+pypi = { auth = "oidc", environment = "pypi", mode = "mock" }
+
+[[exceptions]]
+rule    = "GEN-004"
+path    = ".github/workflows/ci.yml"
+reason  = "basedpyright (recommended mode) is prooft's Python checker; GEN-004 only accepts pylint. Upstream: accept basedpyright/pyright."
+issue   = "https://github.com/forge-ci/prooft/issues/1"
+expires = "2027-02-01"

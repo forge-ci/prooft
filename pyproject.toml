@@ -52,7 +52,7 @@ indent-style = "space"
 
 # ── types: basedpyright ─────────────────────────────────────────────────────
 [tool.basedpyright]
-include = ["src", "tests"]
+include = ["src", "tests", "ci", "ci.py"]
 pythonVersion = "3.10"
 typeCheckingMode = "recommended"
 reportAny = false

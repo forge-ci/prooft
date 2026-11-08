@@ -1,0 +1,59 @@
+name: ci-pre
+
+# Called only by ci.yml's `precheck` job. Installs nothing: ubuntu-24.04's
+# system python3 runs the pinned ci-lint (ci.toml `linter`).
+
+on:
+  workflow_call:
+    inputs:
+      pr-title:
+        description: The pull_request title, or "" (read from env, never interpolated into run).
+        required: false
+        type: string
+        default: ""
+      event-name:
+        description: The caller's github.event_name.
+        required: true
+        type: string
+    outputs:
+      plan:
+        description: Compact plan.json from ci_lint plan.
+        value: ${{ jobs.precheck.outputs.plan }}
+
+permissions:
+  contents: read
+
+jobs:
+  precheck:
+    name: precheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      plan: ${{ steps.plan.outputs.plan }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Checkout ci-lint (pinned -- ci.toml `linter`)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zackees/ci.yml
+          ref: 24362f3e60248ebe72ffd261e5585640228cbc5d
+          path: .ci-lint
+          persist-credentials: false
+
+      - name: Run precheck
+        env:
+          PYTHONPATH: .ci-lint
+          PR_TITLE: ${{ inputs.pr-title }}
+        run: python3 -m ci_lint precheck --repo . --title "$PR_TITLE"
+
+      - name: Compute plan
+        id: plan
+        env:
+          PYTHONPATH: .ci-lint
+          PR_TITLE: ${{ inputs.pr-title }}
+          EVENT_NAME: ${{ inputs.event-name }}
+        run: python3 -m ci_lint plan --repo . --event-name "$EVENT_NAME" --title "$PR_TITLE" --github-output
