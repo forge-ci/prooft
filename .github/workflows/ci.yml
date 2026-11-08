@@ -1,0 +1,141 @@
+name: ci
+
+# The only entry point. prooft dogfoods itself: `verify` reads the head's
+# Ci-Attestation trailers against the PR base's ci-attestations.yml and
+# emits skip_<job>; a job whose gates are all proven is skipped, and
+# `CI OK` credits that skip only when `verify` said so.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  merge_group:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  precheck:
+    name: precheck
+    uses: ./.github/workflows/ci-pre.yml
+    with:
+      pr-title: ${{ github.event.pull_request.title || '' }}
+      event-name: ${{ github.event_name }}
+
+  verify:
+    name: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      skip_fast: ${{ steps.plan.outputs.skip_fast }}
+      skip_test-linux-x64: ${{ steps.plan.outputs.skip_test-linux-x64 }}
+    steps:
+      # The PR *base* is checked out: the wrapper, the verifier and the policy
+      # all come from the base, so a PR cannot edit what judges it.
+      - name: Checkout the base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Plan attested skips
+        id: plan
+        if: hashFiles('ci/verify.py') != ''
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title || '' }}
+          FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+        run: python3 ci/verify.py
+
+  fast:
+    name: fast
+    needs: [verify]
+    if: needs.verify.outputs.skip_fast != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          save-cache: false
+
+      - name: fmt, lint, types
+        run: python3 ci.py fmt lint types
+
+  test-linux-x64:
+    name: test-linux-x64
+    needs: [verify]
+    if: needs.verify.outputs.skip_test-linux-x64 != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          save-cache: false
+
+      - name: pytest
+        run: python3 ci.py test
+
+  ci-ok:
+    name: CI OK
+    if: ${{ always() }}
+    needs: [precheck, verify, fast, test-linux-x64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Gate
+        env:
+          CI_OK_NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 ci/ci_ok.py
+
+  # GEN-022: the final job of every run, so a merge-queue run sweeps
+  # superseded cache entries before GitHub's own eviction picks for us.
+  cache-janitor:
+    name: cache-janitor
+    if: ${{ always() }}
+    needs: [precheck, verify, fast, test-linux-x64, ci-ok]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      group: cache-janitor
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: write
+    env:
+      CI_REMOTE_ONLY: Maintains live GitHub Actions caches
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Checkout ci-lint (pinned -- ci.toml `linter`)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zackees/ci.yml
+          ref: 24362f3e60248ebe72ffd261e5585640228cbc5d
+          path: .ci-lint
+          persist-credentials: false
+
+      - name: Janitor
+        env:
+          PYTHONPATH: .ci-lint
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 -P -m ci_lint cache janitor --repo . --max-deletes 100

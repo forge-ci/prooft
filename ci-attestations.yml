@@ -9,5 +9,5 @@ gates:
   python/all/types: {lane: lint}
   python/linux-x64/test: {lane: tests}
 jobs:
-  ci.yml:lint: [python/all/fmt, python/all/lint, python/all/types]
+  ci.yml:fast: [python/all/fmt, python/all/lint, python/all/types]
   ci.yml:test-linux-x64: [python/linux-x64/test]
