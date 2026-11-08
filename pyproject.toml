@@ -1,0 +1,65 @@
+[project]
+name = "prooft"
+version = "0.1.0"
+description = "Proof marks for client builds: stamp local lint/test passes into commit trailers so CI and the merge queue skip what is already proven."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "BSD-3-Clause"
+authors = [{ name = "Zach Vorhies" }]
+dependencies = []
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python :: 3",
+  "Topic :: Software Development :: Build Tools",
+]
+
+[project.urls]
+Homepage = "https://github.com/forge-ci/prooft"
+Issues = "https://github.com/forge-ci/prooft/issues"
+
+[project.scripts]
+prooft = "prooft.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.14", "basedpyright>=1.31"]
+
+[build-system]
+requires = ["uv_build>=0.8,<0.12"]
+build-backend = "uv_build"
+
+# ── lint: ruff (black-compatible formatter + isort) ─────────────────────────
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+# E/W/F pycodestyle+pyflakes, I isort, B bugbear, UP pyupgrade, C90 complexity,
+# PL pylint subset, A builtins, SIM simplify, RUF ruff-specific.
+select = ["E", "W", "F", "I", "B", "UP", "C90", "C901", "PL", "A", "SIM", "RUF", "RUF100"]
+ignore = ["PLR2004", "PLR0911", "PLR0912", "PLR0913", "PLR0915"]  # C90 bounds complexity instead
+
+[tool.ruff.lint.isort]
+known-first-party = ["prooft"]
+force-sort-within-sections = true
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.format]
+# black-compatible output (ruff format is a drop-in black replacement)
+quote-style = "double"
+indent-style = "space"
+
+# ── types: basedpyright ─────────────────────────────────────────────────────
+[tool.basedpyright]
+include = ["src", "tests"]
+pythonVersion = "3.10"
+typeCheckingMode = "recommended"
+reportAny = false
+reportExplicitAny = false
+reportUnusedCallResult = false
+reportImplicitStringConcatenation = false
+reportImplicitOverride = false  # typing.override needs 3.12; the floor is 3.10
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

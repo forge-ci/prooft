@@ -1,0 +1,13 @@
+# prooft's own attestation policy (GATE-010). CI reads this from the PR base.
+version: 1
+lanes:
+  lint: {max-age-hours: 24}
+  tests: {max-age-hours: 24}
+gates:
+  python/all/fmt: {lane: lint}
+  python/all/lint: {lane: lint}
+  python/all/types: {lane: lint}
+  python/linux-x64/test: {lane: tests}
+jobs:
+  ci.yml:lint: [python/all/fmt, python/all/lint, python/all/types]
+  ci.yml:test-linux-x64: [python/linux-x64/test]

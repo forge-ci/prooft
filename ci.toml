@@ -1,0 +1,7 @@
+# ci.toml: prooft's CI contract, checked by ci-lint (forge-ci/ci.yml).
+schema  = 3
+profile = "github-action"   # closest existing non-Rust profile; ci.yml has no pure-Python profile yet
+linter  = "zackees/ci.yml@24362f3e60248ebe72ffd261e5585640228cbc5d"
+
+[platforms]
+linux-x64 = { target = "x86_64-unknown-linux-gnu", runs-on = "ubuntu-24.04", group = "linux" }
