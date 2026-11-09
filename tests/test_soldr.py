@@ -83,3 +83,16 @@ def test_repo_soldr_failure_stamps_only_what_passed(dev: Repo, tmp_path: Path) -
     assert not result.ok
     assert result.gates == ("rust/all/fmt",)
     assert dev.verify().state(f"rust/{HOST}/clippy") is State.MISSING
+
+
+def test_schema2_success_line_reads_steps_from_the_log(tmp_path: Path) -> None:
+    """soldr#4010 drops `steps` from a success line; the log headers still name every step."""
+    log = tmp_path / "lint.log"
+    log.write_text(
+        "noise\n# --- step fmt: soldr cargo fmt --all -- --check ---\nok\n"
+        f"# --- step clippy --target {WIN}: soldr cargo clippy --target {WIN} ---\n"
+    )
+    line = json.dumps({"exit_code": 0, "status": "ok", "schema_version": 2, "log_path": str(log)})
+    assert [(s.name, s.ok) for s in parse_report(line)] == [("fmt", True), (f"clippy --target {WIN}", True)]
+    failed = json.dumps({"exit_code": 1, "status": "error", "log_path": str(log)})
+    assert parse_report(failed) == ()
