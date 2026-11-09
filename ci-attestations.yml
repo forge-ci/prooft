@@ -1,8 +1,14 @@
 # prooft's own attestation policy (GATE-010). CI reads this from the PR base.
 version: 1
+mode: shadow
 lanes:
-  lint: {max-age-hours: 24}
-  tests: {max-age-hours: 24}
+  # A proof stays valid across a rebase / a moved main while these files are unchanged.
+  lint:
+    max-age-hours: 24
+    inputs: ["src/**", "tests/**", "ci/**", ci.py, pyproject.toml, uv.lock]
+  tests:
+    max-age-hours: 24
+    inputs: ["src/**", "tests/**", "ci/**", ci.py, pyproject.toml, uv.lock]
 gates:
   python/all/fmt: {lane: lint}
   python/all/lint: {lane: lint}

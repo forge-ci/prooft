@@ -31,7 +31,7 @@ rebuilding PRs that were already proven.
 
 ## Then (0.3: merge-queue speed)
 
-5. **Input-keyed lane proofs** (obs-rust `lane_proof.py`, #699): key =
+5. [x] **Input-keyed lane proofs** (obs-rust `lane_proof.py`, #699): key =
    sha256 over the lane's argv, runner image and `(path, blob)` of its
    declared inputs, read from the base. A queue group whose tree differs
    from the PR head still skips a lane whose *inputs* are unchanged.

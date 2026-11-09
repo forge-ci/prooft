@@ -158,5 +158,5 @@ def test_merge_queue_reruns_when_main_moved(hub: FakeGitHub, dev: Repo) -> None:
     other.git.run("push", "-q", "origin", "HEAD:main")
     run = hub.merge_queue(pr)
     assert run.skipped == ()
-    assert "differs" in run.plan.jobs[0].reason
+    assert "wrong-tree" in run.plan.jobs[0].reason
     assert pr.merged  # still merges: the jobs ran and were green

@@ -63,6 +63,8 @@ class Policy:
     max_age_hours: dict[str, float] = field(default_factory=dict[str, float])
     source: str = POLICY_FILE
     mode: str = "shadow"
+    #: lane -> input globs. A lane with inputs gets an input key (see keys.py).
+    inputs: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
 
     # ── loading ──────────────────────────────────────────────────────────
 
@@ -93,14 +95,7 @@ class Policy:
         if mode not in MODES:
             problems.append(f"mode must be one of {', '.join(MODES)}")
         mode = str(mode)
-        max_age: dict[str, float] = {}
-        for lane, spec in _mapping(doc.get("lanes"), "lanes", problems).items():
-            spec_map = _mapping(spec, f"lanes.{lane}", problems)
-            hours = spec_map.get("max-age-hours", DEFAULT_MAX_AGE_HOURS)
-            if isinstance(hours, bool) or not isinstance(hours, int | float) or hours <= 0:
-                problems.append(f"lanes.{lane}.max-age-hours must be a positive number")
-            else:
-                max_age[lane] = float(hours)
+        max_age, inputs = _lanes(doc.get("lanes"), problems)
 
         gates: dict[str, Gate] = {}
         for gate_path, spec in _mapping(doc.get("gates"), "gates", problems).items():
@@ -137,7 +132,7 @@ class Policy:
             jobs[job] = names
         if problems:
             raise PolicyError([f"{source}: {p}" for p in problems])
-        return cls(gates, jobs, max_age, source, mode)
+        return cls(gates, jobs, max_age, source, mode, inputs)
 
     # ── queries ──────────────────────────────────────────────────────────
 
@@ -168,3 +163,26 @@ def _mapping(value: object, where: str, problems: list[str]) -> dict[str, object
         problems.append(f"{where} must be a mapping")
         return {}
     return value  # pyright: ignore[reportUnknownVariableType]
+
+
+def _lanes(value: object, problems: list[str]) -> tuple[dict[str, float], dict[str, tuple[str, ...]]]:
+    max_age: dict[str, float] = {}
+    inputs: dict[str, tuple[str, ...]] = {}
+    for lane, spec in _mapping(value, "lanes", problems).items():
+        spec_map = _mapping(spec, f"lanes.{lane}", problems)
+        unknown = set(spec_map) - {"max-age-hours", "inputs"}
+        if unknown:
+            problems.append(f"lanes.{lane}: unknown keys {', '.join(sorted(unknown))}")
+        hours = spec_map.get("max-age-hours", DEFAULT_MAX_AGE_HOURS)
+        if isinstance(hours, bool) or not isinstance(hours, int | float) or hours <= 0:
+            problems.append(f"lanes.{lane}.max-age-hours must be a positive number")
+        else:
+            max_age[lane] = float(hours)
+        globs = spec_map.get("inputs")
+        if globs is None:
+            continue
+        if not isinstance(globs, list) or not globs or not all(isinstance(g, str) and g for g in globs):  # pyright: ignore[reportUnknownVariableType]
+            problems.append(f"lanes.{lane}.inputs must be a non-empty list of glob strings")
+        else:
+            inputs[lane] = tuple(str(g) for g in globs)  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
+    return max_age, inputs

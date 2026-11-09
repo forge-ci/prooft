@@ -23,9 +23,11 @@ Six rules. Everything else is detail.
 1. **A gate is a check on a platform**: `<ecosystem>/<platform>/<check>`,
    e.g. `rust/x86_64-unknown-linux-gnu/clippy`. A **lane** is the local
    command that proves one or more gates.
-2. **A proof is bound to the exact tree and parents.** Change one byte, or
-   rebase, and it no longer counts (`wrong-tree`, `wrong-parents`). Edit the
-   JSON and the stamp breaks (`bad-stamp`).
+2. **A proof is bound to what the lane read.** By default that is the exact
+   tree and parents: change one byte, or rebase, and it no longer counts
+   (`wrong-tree`, `wrong-parents`). A lane that declares its `inputs` is
+   bound to those files instead, so it survives a rebase that left them
+   alone. Edit the JSON and the stamp breaks (`bad-stamp`).
 3. **Omission means "not run".** A gate without a trailer runs in CI. There
    is no way to say "skipped".
 4. **A job skips only when every gate it covers is proven and fresh**
@@ -43,17 +45,24 @@ a visible red `main`, never a silent green.
 ### The merge queue
 
 A queue commit is brand new, so its own trailers can never match. prooft
-credits the PR's proof when the queue commit is a single commit on the base
-**and its tree is identical to the attested PR head**: the bytes the queue
-would test are the bytes that were proven. If `main` moved, the trees differ
-and the queue runs the jobs.
+credits the PR's proofs when the queue commit is a single commit on the base
+and either
+
+- **its tree is identical to the attested PR head** (the queue would test the
+  proven bytes), or
+- **the lane's declared inputs are unchanged** at the queue commit: `main`
+  moved, but not under anything the lane reads.
+
+Otherwise the queue runs the job.
 
 ## The policy: `ci-attestations.yml`
 
 ```yaml
 version: 1
 lanes:
-  lint: {max-age-hours: 24}          # optional; 24 is the default
+  lint:
+    max-age-hours: 24                # optional; 24 is the default
+    inputs: ["src/**", pyproject.toml] # optional: key the proof to these files
 gates:
   python/all/fmt:        {lane: lint}
   python/all/types:      {lane: lint}
