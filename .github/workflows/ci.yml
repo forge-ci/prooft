@@ -32,6 +32,9 @@ jobs:
     name: verify
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read # merge_group: resolve the queued PR's head sha
     outputs:
       skip_fast: ${{ steps.plan.outputs.skip_fast }}
       skip_test-linux-x64: ${{ steps.plan.outputs.skip_test-linux-x64 }}
@@ -41,7 +44,7 @@ jobs:
       - name: Checkout the base
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.sha }}
           fetch-depth: 0
 
       - name: Plan attested skips
@@ -49,10 +52,13 @@ jobs:
         if: hashFiles('ci/verify.py') != ''
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           PR_TITLE: ${{ github.event.pull_request.title || '' }}
-          FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+          QUEUE_REF: ${{ github.event.merge_group.head_ref || '' }}
+          REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: python3 ci/verify.py
 
   fast:

@@ -79,3 +79,24 @@ def test_verify_push_event_skips_nothing(hub: FakeGitHub, tmp_path: Path) -> Non
     base = hub.clone("base")
     outputs = run_verify(base, {"EVENT_NAME": "push", "BASE_SHA": "", "HEAD_SHA": base.commit().sha}, tmp_path)
     assert outputs == {"skip_fast": "false", "skip_test-linux-x64": "false"}
+
+
+verify_script = load("verify")
+
+
+@pytest.mark.parametrize(
+    ("ref", "number"),
+    [
+        (f"refs/heads/gh-readonly-queue/main/pr-12-{'a' * 40}", 12),
+        ("refs/heads/gh-readonly-queue/main/pr-x-abc", None),
+        ("refs/heads/main", None),
+    ],
+)
+def test_queue_pr_number(ref: str, number: int | None) -> None:
+    assert verify_script.queue_pr_number(ref) == number
+
+
+def test_verify_merge_group_without_a_pr_skips_nothing(hub: FakeGitHub, tmp_path: Path) -> None:
+    base = hub.clone("base")
+    env = {"EVENT_NAME": "merge_group", "BASE_SHA": base.commit().sha, "HEAD_SHA": base.commit().sha, "QUEUE_REF": "x"}
+    assert run_verify(base, env, tmp_path) == {"skip_fast": "false", "skip_test-linux-x64": "false"}
