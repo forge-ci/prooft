@@ -11,8 +11,9 @@ repo.queue(pr_head="pr-head", queue_head="HEAD", base="origin/main").skipped
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -20,12 +21,12 @@ import sys
 import time
 
 from prooft.adapters import soldr as soldr_adapter
-from prooft.attestation import Attestation, Via, append
+from prooft.attestation import Attestation, Trailers, Via, append
 from prooft.git import Commit, Git
 from prooft.keys import lane_key
 from prooft.platforms import host_triple
 from prooft.policy import POLICY_FILE, Policy, PolicyError
-from prooft.verify import Plan, Verdict, decide, verify
+from prooft.verify import Plan, State, Verdict, decide, verify
 
 #: Paths whose change makes a head untrusted: a PR must not be able to edit
 #: the rules (or the jobs) it is judged by and still skip them.
@@ -133,6 +134,41 @@ class Repo:
         gates = soldr_adapter.proven_gates(proc.stdout, triple, frozenset(policy.gates))
         sha = self.stamp(gates, policy=policy, secs=secs) if gates else before
         return SoldrRun(sha=sha, gates=gates, exit_code=proc.returncode)
+
+    def emit(self, rev: str = "HEAD", *, policy: Policy | None = None) -> dict[str, object]:
+        """A JSON-ready bundle of ``rev``'s *valid* attestations, for tools that cannot amend commits."""
+        policy = policy or self.policy()
+        commit = self.commit(rev)
+        valid = set(self.verify(rev, policy=policy).valid)
+        return {
+            "v": 1,
+            "sha": commit.sha,
+            "tree": commit.tree,
+            "parents": list(commit.parents),
+            "attestations": [
+                json.loads(a.to_json()) for a in Trailers.parse(commit.message).attestations if a.gate in valid
+            ],
+        }
+
+    def apply(self, bundle: Mapping[str, object], *, policy: Policy | None = None) -> tuple[str, ...]:
+        """Stamp HEAD with every attestation in ``bundle`` that is valid *for HEAD*; return those gates.
+
+        A bundle produced elsewhere (a build farm, another clone) is judged
+        exactly as if its trailers were on HEAD already: an entry for another
+        tree only counts when its lane's declared inputs are unchanged.
+        """
+        policy = policy or self.policy()
+        raw = bundle.get("attestations")
+        if bundle.get("v") != 1 or not isinstance(raw, list):
+            raise ValueError("not a prooft bundle (expected v=1 and an 'attestations' list)")
+        incoming = [Attestation.from_json(json.dumps(item)) for item in raw]  # pyright: ignore[reportUnknownVariableType]
+        head = self.commit()
+        candidate = Commit(head.sha, head.tree, head.parents, "\n".join(a.to_trailer() for a in incoming))
+        verdict = verify(candidate, policy, keys=self.keys(policy, head.sha))
+        accepted = [a for a in incoming if verdict.state(a.gate) is State.VALID]
+        if accepted:
+            self.git.amend_message(append(head.message, accepted))
+        return tuple(a.gate for a in accepted)
 
     # ── deciding ─────────────────────────────────────────────────────────
 
