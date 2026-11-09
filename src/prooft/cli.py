@@ -6,6 +6,8 @@
     prooft queue --pr-head REV --queue-head REV --base REV
     prooft lanes                     list lanes and the gates each proves
     prooft soldr [--host T] [-- CMD]  run soldr lint (porcelain); stamp the Rust gates whose steps passed
+    prooft emit [REV] [-o FILE]      REV's valid attestations as a JSON bundle
+    prooft apply FILE|-              stamp HEAD with the bundle entries valid for HEAD
     prooft hook install [--force]    install the pre-push hook
     prooft check-push                what the hook runs (git pre-push stdin)
 
@@ -103,6 +105,30 @@ def _cmd_soldr(repo: prooft.Repo, args: argparse.Namespace) -> int:
     return 0 if result.ok else 1
 
 
+def _cmd_emit(repo: prooft.Repo, args: argparse.Namespace) -> int:
+    text = json.dumps(repo.emit(args.rev), indent=2) + "\n"
+    if args.output in (None, "-"):
+        sys.stdout.write(text)
+    else:
+        with open(args.output, "w", encoding="utf-8") as handle:
+            handle.write(text)
+    return 0
+
+
+def _cmd_apply(repo: prooft.Repo, args: argparse.Namespace) -> int:
+    if args.bundle == "-":
+        bundle = json.load(sys.stdin)
+    else:
+        with open(args.bundle, encoding="utf-8") as handle:
+            bundle = json.load(handle)
+    gates = repo.apply(bundle)
+    for gate in gates:
+        print(f"applied {gate}")
+    if not gates:
+        print("nothing in the bundle is valid for HEAD")
+    return 0 if gates else 1
+
+
 def _cmd_hook(repo: prooft.Repo, args: argparse.Namespace) -> int:
     print(f"installed {hook.install(repo, force=args.force)}")
     return 0
@@ -124,6 +150,8 @@ COMMANDS = {
     "hook": _cmd_hook,
     "check-push": _cmd_check_push,
     "soldr": _cmd_soldr,
+    "emit": _cmd_emit,
+    "apply": _cmd_apply,
 }
 
 
@@ -159,6 +187,13 @@ def _parser() -> argparse.ArgumentParser:
     p_soldr = sub.add_parser("soldr", help="run soldr lint (porcelain) and stamp the Rust gates it proved")
     p_soldr.add_argument("--host", help="host triple for host-only steps (default: detected)")
     p_soldr.add_argument("cmd", nargs=argparse.REMAINDER, help="default: soldr lint rust --check")
+
+    p_emit = sub.add_parser("emit", help="print REV's valid attestations as a JSON bundle")
+    p_emit.add_argument("rev", nargs="?", default="HEAD")
+    p_emit.add_argument("-o", "--output", help="write to a file instead of stdout")
+
+    p_apply = sub.add_parser("apply", help="stamp HEAD with a bundle's attestations that are valid for HEAD")
+    p_apply.add_argument("bundle", help="bundle file, or - for stdin")
 
     p_hook = sub.add_parser("hook", help="install the pre-push hook")
     p_hook.add_argument("action", choices=["install"])

@@ -85,6 +85,9 @@ prooft verify [REV]            every gate's state on REV
 prooft plan --base REV         which jobs a PR run may skip  (--github-output, --json)
 prooft queue --base REV --pr-head REV [--queue-head REV]
 prooft lanes                   lanes and the gates each proves
+prooft soldr [-- CMD]          soldr lint (porcelain) -> per-target Rust gates
+prooft emit [REV] [-o FILE]    REV's valid attestations as a JSON bundle
+prooft apply FILE|-            stamp HEAD with the bundle entries valid for HEAD
 prooft hook install [--force]  pre-push hook: warn (shadow) or refuse (enforce) an unattested head
 ```
 
@@ -131,6 +134,18 @@ repo.queue(pr_head="pr", queue_head="HEAD", base="origin/main").skipped
 
 Lower level: `prooft.Attestation`, `prooft.Trailers`, `prooft.Policy`,
 `prooft.verify(commit, policy)`, `prooft.decide(policy, verdict)`.
+
+## Proofs from elsewhere
+
+A build farm that cannot amend your commit can still prove it:
+
+```console
+farm$ prooft run tests -- ./ci.py test && prooft emit -o proof.json
+you$  prooft apply proof.json            # stamps only entries valid for YOUR HEAD
+```
+
+`apply` judges the bundle exactly as if its trailers were already on HEAD:
+same tree and parents, or (for a lane with `inputs`) unchanged inputs.
 
 ## Simulating GitHub
 

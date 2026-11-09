@@ -44,7 +44,7 @@ rebuilding PRs that were already proven.
 
 8. [x] **soldr adapter**: `prooft soldr` (and `repo.soldr()`) maps soldr's porcelain JSON
    summary to per-target gates (`rust/<triple>/clippy`, `.../dylint`).
-9. **`prooft emit --json`**: a standalone attestation bundle (for tools that
+9. [x] **`prooft emit` / `prooft apply`**: a standalone attestation bundle (for tools that
    cannot amend commits, e.g. a remote build farm).
 10. **Isolation proof (GATE-009)**: accept a bosn run record
     (`workspace`, `sha`, `dirty`) as evidence the runner saw this tree.
