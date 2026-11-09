@@ -5,6 +5,7 @@
     prooft plan --base REV [--head REV] [--title T] [--fork] [--github-output]
     prooft queue --pr-head REV --queue-head REV --base REV
     prooft lanes                     list lanes and the gates each proves
+    prooft soldr [--host T] [-- CMD]  run soldr lint (porcelain); stamp the Rust gates whose steps passed
     prooft hook install [--force]    install the pre-push hook
     prooft check-push                what the hook runs (git pre-push stdin)
 
@@ -90,6 +91,18 @@ def _cmd_plan(repo: prooft.Repo, args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_soldr(repo: prooft.Repo, args: argparse.Namespace) -> int:
+    cmd = [str(c) for c in args.cmd]
+    if cmd[:1] == ["--"]:
+        cmd = cmd[1:]
+    result = repo.soldr(cmd or ("soldr", "lint", "rust", "--check"), host=args.host)
+    for gate in result.gates:
+        print(f"attested {gate}")
+    if not result.gates:
+        print("no declared gate passed; nothing attested")
+    return 0 if result.ok else 1
+
+
 def _cmd_hook(repo: prooft.Repo, args: argparse.Namespace) -> int:
     print(f"installed {hook.install(repo, force=args.force)}")
     return 0
@@ -110,6 +123,7 @@ COMMANDS = {
     "queue": _cmd_plan,
     "hook": _cmd_hook,
     "check-push": _cmd_check_push,
+    "soldr": _cmd_soldr,
 }
 
 
@@ -141,6 +155,10 @@ def _parser() -> argparse.ArgumentParser:
             p.add_argument("--queue-head", default="HEAD")
 
     sub.add_parser("lanes", help="list lanes and their gates")
+
+    p_soldr = sub.add_parser("soldr", help="run soldr lint (porcelain) and stamp the Rust gates it proved")
+    p_soldr.add_argument("--host", help="host triple for host-only steps (default: detected)")
+    p_soldr.add_argument("cmd", nargs=argparse.REMAINDER, help="default: soldr lint rust --check")
 
     p_hook = sub.add_parser("hook", help="install the pre-push hook")
     p_hook.add_argument("action", choices=["install"])

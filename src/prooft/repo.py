@@ -11,15 +11,19 @@ repo.queue(pr_head="pr-head", queue_head="HEAD", base="origin/main").skipped
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+import os
 from pathlib import Path
 import subprocess
+import sys
 import time
 
+from prooft.adapters import soldr as soldr_adapter
 from prooft.attestation import Attestation, Via, append
 from prooft.git import Commit, Git
 from prooft.keys import lane_key
+from prooft.platforms import host_triple
 from prooft.policy import POLICY_FILE, Policy, PolicyError
 from prooft.verify import Plan, Verdict, decide, verify
 
@@ -73,6 +77,62 @@ class Repo:
 
     def lane(self, name: str, *, policy: Policy | None = None) -> LaneRun:
         return LaneRun(self, name, policy or self.policy())
+
+    def stamp(
+        self,
+        gates: Iterable[str],
+        *,
+        policy: Policy | None = None,
+        secs: int | None = None,
+        key: str = "",
+        via: Via = "run",
+        at: int | None = None,
+    ) -> str:
+        """Stamp HEAD for exactly ``gates``, each with its policy lane and input key. Returns the new HEAD."""
+        policy = policy or self.policy()
+        head = self.commit()
+        stamps: list[Attestation] = []
+        for path in dict.fromkeys(gates):
+            gate = policy.gates.get(path)
+            if gate is None:
+                raise ValueError(f"{path} is not a gate in {policy.source}")
+            globs = policy.inputs.get(gate.lane)
+            lane_k = key or (lane_key(self.git, head.sha, gate.lane, globs) if globs else "")
+            stamps.append(
+                Attestation.new(
+                    path, tree=head.tree, parents=head.parents, lane=gate.lane, key=lane_k, via=via, secs=secs, at=at
+                )
+            )
+        if not stamps:
+            return head.sha
+        return self.git.amend_message(append(head.message, stamps))
+
+    def soldr(
+        self, command: Sequence[str] = ("soldr", "lint", "rust", "--check"), *, host: str | None = None
+    ) -> SoldrRun:
+        """Run ``soldr lint`` in porcelain mode, then stamp the declared Rust gates whose steps passed.
+
+        Like ``LaneRun.run`` it refuses a dirty tree and a run that changes
+        tracked files. A failing step stamps nothing for itself; the steps
+        that passed before it are still stamped.
+        """
+        policy = self.policy()
+        triple = host or host_triple()
+        if triple is None:
+            raise RuntimeError("unknown host triple: pass host=...")
+        if not self.git.is_clean():
+            raise RuntimeError("working tree is dirty: commit first, prooft attests commits")
+        before = self.commit().sha
+        env = {**os.environ, "SOLDR_PORCELAIN": "1", "CI": "true"}
+        started = time.monotonic()
+        proc = subprocess.run(list(command), cwd=self.root, env=env, capture_output=True, text=True, check=False)
+        secs = int(time.monotonic() - started)
+        sys.stderr.write(proc.stderr)
+        if self.commit().sha != before or not self.git.is_clean():
+            raise RuntimeError("soldr changed HEAD or tracked files; nothing was attested")
+        gates = soldr_adapter.proven_gates(proc.stdout, triple, frozenset(policy.gates))
+        sha = self.stamp(gates, policy=policy, secs=secs) if gates else before
+        return SoldrRun(sha=sha, gates=gates, exit_code=proc.returncode)
 
     # ── deciding ─────────────────────────────────────────────────────────
 
@@ -170,18 +230,21 @@ class LaneRun:
         return self.record(secs=secs, key=key)
 
     def record(self, *, secs: int | None = None, key: str = "", via: Via = "run", at: int | None = None) -> str:
-        """Stamp HEAD for this lane without running anything (the caller ran it)."""
-        head = self.repo.commit()
-        globs = self.policy.inputs.get(self.name)
-        if not key and globs:
-            key = lane_key(self.repo.git, head.sha, self.name, globs)
-        stamps = [
-            Attestation.new(g, tree=head.tree, parents=head.parents, lane=self.name, key=key, via=via, secs=secs, at=at)
-            for g in self.gates
-        ]
-        return self.repo.git.amend_message(append(head.message, stamps))
+        """Stamp HEAD for every gate of this lane without running anything (the caller ran it)."""
+        return self.repo.stamp(self.gates, policy=self.policy, secs=secs, key=key, via=via, at=at)
 
 
 def open(path: str | Path = ".") -> Repo:  # noqa: A001 - fluent `prooft.open(...)`
     root = Git(Path(path)).run("rev-parse", "--show-toplevel").strip()
     return Repo(Path(root))
+
+
+@dataclass(frozen=True)
+class SoldrRun:
+    sha: str
+    gates: tuple[str, ...]
+    exit_code: int
+
+    @property
+    def ok(self) -> bool:
+        return self.exit_code == 0
