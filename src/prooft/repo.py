@@ -203,29 +203,52 @@ class Repo:
         return decide(policy, verdict, trusted=trusted, untrusted_reason=why)
 
     def queue(self, pr_head: str, queue_head: str, base: str, *, now: float | None = None) -> Plan:
-        """Merge-queue credit for a single-PR group.
+        """Merge-queue credit for one entry of a merge group.
 
         The queue commit is new (new parents), so its own trailers never match.
         It inherits the PR head's proofs in two ways:
 
-        - **same tree**: the queue would test exactly the attested bytes;
-        - **same inputs**: ``main`` moved, but a lane whose declared inputs
-          hash to the attested key at the *queue* commit still counts.
+        - **same tree**: the queue would test exactly the attested bytes
+          (first entry only);
+        - **same inputs**: ``main`` moved, or earlier group entries sit
+          underneath, but a lane whose declared inputs hash to the attested
+          key at the *queue* commit still counts.
+
+        Later entries of a multi-PR group (``max_entries_to_merge > 1``) are
+        credited only when the entries beneath them touch no trust surface.
         """
         policy = self.policy(base)
         pr = self.commit(pr_head)
         q = self.commit(queue_head)
         base_sha = self.commit(base).sha
-        if q.parents != (base_sha,):
+        depth = self._queue_depth(q, base_sha)
+        if depth is None:
             verdict = verify(pr, policy, now=now)
-            return decide(policy, verdict, trusted=False, untrusted_reason="queue head is not one commit on the base")
+            reason = "queue head is not a linear stack of group entries on the base"
+            return decide(policy, verdict, trusted=False, untrusted_reason=reason)
         trusted, why = self.trust(base_sha, pr.sha)
-        if q.tree == pr.tree:
+        if trusted and depth > 1:
+            below, why_below = self.trust(base_sha, q.parents[0])
+            if not below:
+                trusted, why = False, f"an earlier group entry: {why_below}"
+        if depth == 1 and q.tree == pr.tree:
             verdict = verify(pr, policy, now=now, keys=self.keys(policy, pr.sha))
         else:
             as_queued = Commit(q.sha, q.tree, q.parents, pr.message)
             verdict = verify(as_queued, policy, now=now, keys=self.keys(policy, q.sha))
         return decide(policy, verdict, trusted=trusted, untrusted_reason=why)
+
+    def _queue_depth(self, q: Commit, base_sha: str, limit: int = 32) -> int | None:
+        """Group entries from ``base`` up to ``q`` (1 = first entry); None if not a linear stack."""
+        commit, depth = q, 0
+        while depth < limit:
+            if len(commit.parents) != 1:
+                return None
+            depth += 1
+            if commit.parents[0] == base_sha:
+                return depth
+            commit = self.commit(commit.parents[0])
+        return None
 
     @staticmethod
     def release() -> str:

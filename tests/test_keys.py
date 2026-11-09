@@ -8,7 +8,7 @@ from prooft import State
 from prooft.keys import matches
 from prooft.policy import Policy, PolicyError
 from prooft.repo import Repo
-from prooft.sim.github import FakeGitHub
+from prooft.sim.github import FakeGitHub, PullRequest
 from tests.conftest import commit
 
 KEYED = """\
@@ -114,3 +114,39 @@ def test_queue_reruns_keyed_lane_when_main_changed_its_inputs(hub: FakeGitHub, k
     move_main(hub, "src/b.py")
     run = hub.merge_queue(pr)
     assert "ci.yml:lint" in run.ran
+
+
+def attested_pr(hub: FakeGitHub, name: str, path: str, *, lanes: tuple[str, ...] = ("lint",)) -> PullRequest:
+    """A PR from its own clone of main, attested on the given lanes."""
+    author = hub.clone(name)
+    commit(author, path, f"{name}\n", f"{name} touches {path}")
+    for lane in lanes:
+        author.lane(lane).run(["true"])
+    return hub.open_pr(author, name, title=name)
+
+
+def test_multi_pr_group_credits_later_entries_with_unchanged_inputs(hub: FakeGitHub, keyed: Repo) -> None:
+    """obs-studio queues groups of up to 5 (ALLGREEN): entry 2 sits on entry 1's squash commit."""
+    del keyed
+    docs = attested_pr(hub, "docs-pr", "docs/a.md")
+    code = attested_pr(hub, "code-pr", "src/b.py")
+    first, second = hub.merge_group([docs, code])
+    assert first.skipped == ("ci.yml:lint",)
+    assert second.skipped == ("ci.yml:lint",)  # docs-pr changed no lint input
+    assert docs.merged and code.merged
+
+
+def test_multi_pr_group_reruns_when_an_earlier_entry_changed_the_inputs(hub: FakeGitHub, keyed: Repo) -> None:
+    del keyed
+    one = attested_pr(hub, "one", "src/one.py")
+    two = attested_pr(hub, "two", "src/two.py")
+    _, second = hub.merge_group([one, two])
+    assert "ci.yml:lint" in second.ran  # entry 2's inputs include entry 1's file
+
+
+def test_multi_pr_group_reruns_after_an_earlier_entry_edits_a_trust_surface(hub: FakeGitHub, keyed: Repo) -> None:
+    del keyed
+    ci = attested_pr(hub, "ci-edit", ".github/workflows/x.yml")
+    code = attested_pr(hub, "code", "src/c.py")
+    _, second = hub.merge_group([ci, code])
+    assert "ci.yml:lint" in second.ran

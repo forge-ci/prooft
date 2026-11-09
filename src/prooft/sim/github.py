@@ -166,3 +166,29 @@ class FakeGitHub:
             self.log.append(f"PR #{pr.number} merged as {queue_sha[:8]}")
         pr.runs.append(run)
         return run
+
+    def merge_group(self, prs: list[PullRequest]) -> list[Run]:
+        """A multi-PR group (``grouping_strategy: ALLGREEN``): entry N sits on entries 1..N-1.
+
+        Each entry gets its own ``merge_group`` run; main fast-forwards to the
+        top only if every entry is green, as GitHub does.
+        """
+        runner = self._runner()
+        base = runner.commit("origin/main").sha
+        runner.git.run("checkout", "-q", "--detach", base)
+        runs: list[Run] = []
+        for pr in prs:
+            runner.git.run("merge", "-q", "--squash", pr.head)
+            runner.git.run("commit", "-q", "--allow-empty", "-m", f"{pr.title} (#{pr.number})")
+            sha = runner.commit().sha
+            plan = runner.queue(pr_head=pr.head, queue_head=sha, base=base)
+            ran, failed = self._execute(runner, sha, plan)
+            run = Run("merge_group", sha, plan, ran, failed)
+            self.log.append(f"merge_group #{pr.number} {sha[:8]}: skipped={list(run.skipped)} ran={list(ran)}")
+            pr.runs.append(run)
+            runs.append(run)
+        if all(r.green for r in runs):
+            runner.git.run("push", "-q", "origin", f"{runs[-1].sha}:refs/heads/main")
+            for pr in prs:
+                pr.merged = True
+        return runs
