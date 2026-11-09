@@ -53,7 +53,8 @@ and either
 - **the lane's declared inputs are unchanged** at the queue commit: `main`
   moved, but not under anything the lane reads.
 
-Otherwise the queue runs the job.
+Otherwise the queue runs the job. prooft's own `main` merges through a
+single-PR merge queue whose `verify` job runs `prooft queue` from the base.
 
 ## The policy: `ci-attestations.yml`
 
