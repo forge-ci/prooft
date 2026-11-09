@@ -3,7 +3,7 @@
     prooft run LANE -- CMD...        run CMD; on success stamp HEAD for LANE's gates
     prooft verify [REV]              show every gate's state on REV (default HEAD)
     prooft plan --base REV [--head REV] [--title T] [--fork] [--github-output]
-    prooft queue --pr-head REV --queue-head REV --base REV
+    prooft queue --pr-head REV --queue-head REV --base REV [--ledger DIR|github]
     prooft lanes                     list lanes and the gates each proves
     prooft soldr [--host T] [-- CMD]  run soldr lint (porcelain); stamp the Rust gates whose steps passed
     prooft emit [REV] [-o FILE]      REV's valid attestations as a JSON bundle
@@ -20,10 +20,12 @@ import argparse
 from collections.abc import Sequence
 import json
 import os
+from pathlib import Path
 import sys
 
 import prooft
 from prooft import hook
+from prooft.ledger import DEFAULT_NAME, DirLedger, GitHubArtifacts, Ledger
 from prooft.policy import PolicyError
 from prooft.verify import Plan
 
@@ -82,11 +84,21 @@ def _cmd_lanes(repo: prooft.Repo, _: argparse.Namespace) -> int:
     return 0
 
 
+def _ledger(args: argparse.Namespace) -> Ledger | None:
+    spec: str = args.ledger
+    if not spec:
+        return None
+    if spec == "github":
+        repository = os.environ.get("GITHUB_REPOSITORY", "")
+        return GitHubArtifacts(repository, os.environ.get("GITHUB_TOKEN", ""), name=args.ledger_name)
+    return DirLedger(Path(spec), name=args.ledger_name)
+
+
 def _cmd_plan(repo: prooft.Repo, args: argparse.Namespace) -> int:
     if args.command == "plan":
-        plan = repo.plan(args.base, args.head, title=args.title, fork=args.fork)
+        plan = repo.plan(args.base, args.head, title=args.title, fork=args.fork, ledger=_ledger(args))
     else:
-        plan = repo.queue(pr_head=args.pr_head, queue_head=args.queue_head, base=args.base)
+        plan = repo.queue(pr_head=args.pr_head, queue_head=args.queue_head, base=args.base, ledger=_ledger(args))
     print(_plan_report(plan, args.json))
     if args.github_output:
         _write_outputs(plan)
@@ -174,6 +186,12 @@ def _parser() -> argparse.ArgumentParser:
         p.add_argument("--base", required=True)
         p.add_argument("--json", action="store_true")
         p.add_argument("--github-output", action="store_true", help="append skip_<job>=true|false to $GITHUB_OUTPUT")
+        p.add_argument(
+            "--ledger",
+            default="",
+            help="hosted proofs: a directory, or `github` (artifacts in $GITHUB_REPOSITORY, token $GITHUB_TOKEN)",
+        )
+        p.add_argument("--ledger-name", default=DEFAULT_NAME, help="entry name format with {lane} and {key}")
         if name == "plan":
             p.add_argument("--head", default="HEAD")
             p.add_argument("--title", default="")
