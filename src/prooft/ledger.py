@@ -112,41 +112,46 @@ class GitHubArtifacts:
     """Artifacts named after the key, uploaded by a passing run (obs-studio #699).
 
     A proof counts only if the artifact is unexpired and the run that uploaded
-    it ran on a branch of *this* repository (a fork's run executes the fork's
-    workflow, so it proves nothing).
+    it is ``workflow`` (the CI workflow, not any workflow a comment or a
+    dispatch can start), on a ``pull_request`` or ``merge_group`` event, from
+    a branch of *this* repository (a fork's run executes the fork's workflow,
+    so it proves nothing).
     """
 
     repository: str
     token: str = ""
     name: str = DEFAULT_NAME
+    workflow: str = ".github/workflows/ci.yml"
+    events: tuple[str, ...] = ("pull_request", "merge_group")
     fetch: Fetch | None = None
 
     def lookup(self, lane: str, key: str) -> Proof | None:
         fetch = self.fetch or _github_fetch(self.token)
+        api = f"https://api.github.com/repos/{self.repository}/actions"
         name = self.name.format(lane=lane, key=key)
         query = urllib.parse.urlencode({"name": name, "per_page": 20})
+        best: Proof | None = None
         try:
-            listing = fetch(f"https://api.github.com/repos/{self.repository}/actions/artifacts?{query}")
+            for art in map(_obj, _list(_obj(fetch(f"{api}/artifacts?{query}")).get("artifacts"))):
+                at = _epoch(art.get("created_at"))
+                run_id = _obj(art.get("workflow_run")).get("id")
+                if art.get("name") != name or art.get("expired") is not False or at is None or run_id is None:
+                    continue
+                if best is not None and at <= best.at:
+                    continue
+                run = _obj(fetch(f"{api}/runs/{run_id}"))
+                if self.trusted(run):
+                    best = Proof(lane, key, at, f"run {run_id} ({run.get('event')}, {run.get('head_branch')})")
         except (OSError, ValueError):
             return None
-        best: Proof | None = None
-        for art in _list(_obj(listing).get("artifacts")):
-            proof = self._trusted(_obj(art), lane, key, name)
-            if proof is not None and (best is None or proof.at > best.at):
-                best = proof
         return best
 
-    @staticmethod
-    def _trusted(art: dict[str, object], lane: str, key: str, name: str) -> Proof | None:
-        if art.get("name") != name or art.get("expired") is not False:
-            return None
-        run = _obj(art.get("workflow_run"))
-        if "repository_id" not in run or run.get("head_repository_id") != run.get("repository_id"):
-            return None
-        at = _epoch(art.get("created_at"))
-        if at is None:
-            return None
-        return Proof(lane, key, at, f"run {run.get('id')} on {run.get('head_branch')}")
+    def trusted(self, run: dict[str, object]) -> bool:
+        return (
+            run.get("path") == self.workflow
+            and run.get("event") in self.events
+            and _obj(run.get("head_repository")).get("full_name") == self.repository
+        )
 
 
 def credit(

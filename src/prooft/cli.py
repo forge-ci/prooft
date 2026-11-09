@@ -94,11 +94,30 @@ def _ledger(args: argparse.Namespace) -> Ledger | None:
     return DirLedger(Path(spec), name=args.ledger_name)
 
 
+def _lane_keys(args: argparse.Namespace) -> dict[str, str]:
+    pairs: list[str] = args.lane_key
+    out: dict[str, str] = {}
+    for pair in pairs:
+        lane, sep, key = pair.partition("=")
+        if not sep or not lane or not key:
+            raise SystemExit(f"prooft: --lane-key wants LANE=KEY, got {pair!r}")
+        out[lane] = key
+    return out
+
+
 def _cmd_plan(repo: prooft.Repo, args: argparse.Namespace) -> int:
     if args.command == "plan":
-        plan = repo.plan(args.base, args.head, title=args.title, fork=args.fork, ledger=_ledger(args))
+        plan = repo.plan(
+            args.base, args.head, title=args.title, fork=args.fork, ledger=_ledger(args), keys=_lane_keys(args)
+        )
     else:
-        plan = repo.queue(pr_head=args.pr_head, queue_head=args.queue_head, base=args.base, ledger=_ledger(args))
+        plan = repo.queue(
+            pr_head=args.pr_head,
+            queue_head=args.queue_head,
+            base=args.base,
+            ledger=_ledger(args),
+            keys=_lane_keys(args),
+        )
     print(_plan_report(plan, args.json))
     if args.github_output:
         _write_outputs(plan)
@@ -192,6 +211,13 @@ def _parser() -> argparse.ArgumentParser:
             help="hosted proofs: a directory, or `github` (artifacts in $GITHUB_REPOSITORY, token $GITHUB_TOKEN)",
         )
         p.add_argument("--ledger-name", default=DEFAULT_NAME, help="entry name format with {lane} and {key}")
+        p.add_argument(
+            "--lane-key",
+            action="append",
+            default=[],
+            metavar="LANE=KEY",
+            help="use KEY as LANE's input key (repeatable; overrides prooft's own key)",
+        )
         if name == "plan":
             p.add_argument("--head", default="HEAD")
             p.add_argument("--title", default="")
