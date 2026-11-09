@@ -19,6 +19,7 @@ import time
 
 from prooft.attestation import Attestation, Via, append
 from prooft.git import Commit, Git
+from prooft.keys import lane_key
 from prooft.policy import POLICY_FILE, Policy, PolicyError
 from prooft.verify import Plan, Verdict, decide, verify
 
@@ -60,8 +61,13 @@ class Repo:
             raise PolicyError([f"{POLICY_FILE} does not exist at {rev}"])
         return Policy.parse(text, source=f"{rev}:{POLICY_FILE}")
 
+    def keys(self, policy: Policy, rev: str = "HEAD") -> dict[str, str]:
+        """Input key per lane that declares inputs, computed from ``rev``'s files."""
+        return {lane: lane_key(self.git, rev, lane, globs) for lane, globs in policy.inputs.items()}
+
     def verify(self, rev: str = "HEAD", *, policy: Policy | None = None, now: float | None = None) -> Verdict:
-        return verify(self.commit(rev), policy or self.policy(), now=now)
+        policy = policy or self.policy()
+        return verify(self.commit(rev), policy, now=now, keys=self.keys(policy, rev))
 
     # ── writing ──────────────────────────────────────────────────────────
 
@@ -97,30 +103,32 @@ class Repo:
         """Which jobs a ``pull_request`` run on ``head`` may skip. Policy comes from ``base``."""
         policy = self.policy(base)
         trusted, why = self.trust(base, head, title=title, fork=fork)
-        return decide(policy, verify(self.commit(head), policy, now=now), trusted=trusted, untrusted_reason=why)
+        verdict = verify(self.commit(head), policy, now=now, keys=self.keys(policy, head))
+        return decide(policy, verdict, trusted=trusted, untrusted_reason=why)
 
     def queue(self, pr_head: str, queue_head: str, base: str, *, now: float | None = None) -> Plan:
-        """Merge-queue credit: a single-PR group whose tree equals the PR head's.
+        """Merge-queue credit for a single-PR group.
 
-        The queue commit is new (new parents), so its own trailers can never
-        match. It inherits the PR head's verdict only when the queue head's
-        sole parent is ``base`` and both trees are identical: the bytes the
-        queue would test are exactly the bytes that were attested.
+        The queue commit is new (new parents), so its own trailers never match.
+        It inherits the PR head's proofs in two ways:
+
+        - **same tree**: the queue would test exactly the attested bytes;
+        - **same inputs**: ``main`` moved, but a lane whose declared inputs
+          hash to the attested key at the *queue* commit still counts.
         """
         policy = self.policy(base)
         pr = self.commit(pr_head)
         q = self.commit(queue_head)
         base_sha = self.commit(base).sha
-        verdict = verify(pr, policy, now=now)
         if q.parents != (base_sha,):
-            return decide(
-                policy, verdict, trusted=False, untrusted_reason="queue head is not a single commit on the base"
-            )
-        if q.tree != pr.tree:
-            return decide(
-                policy, verdict, trusted=False, untrusted_reason="queue tree differs from the attested PR tree"
-            )
+            verdict = verify(pr, policy, now=now)
+            return decide(policy, verdict, trusted=False, untrusted_reason="queue head is not one commit on the base")
         trusted, why = self.trust(base_sha, pr.sha)
+        if q.tree == pr.tree:
+            verdict = verify(pr, policy, now=now, keys=self.keys(policy, pr.sha))
+        else:
+            as_queued = Commit(q.sha, q.tree, q.parents, pr.message)
+            verdict = verify(as_queued, policy, now=now, keys=self.keys(policy, q.sha))
         return decide(policy, verdict, trusted=trusted, untrusted_reason=why)
 
     @staticmethod
@@ -164,6 +172,9 @@ class LaneRun:
     def record(self, *, secs: int | None = None, key: str = "", via: Via = "run", at: int | None = None) -> str:
         """Stamp HEAD for this lane without running anything (the caller ran it)."""
         head = self.repo.commit()
+        globs = self.policy.inputs.get(self.name)
+        if not key and globs:
+            key = lane_key(self.repo.git, head.sha, self.name, globs)
         stamps = [
             Attestation.new(g, tree=head.tree, parents=head.parents, lane=self.name, key=key, via=via, secs=secs, at=at)
             for g in self.gates

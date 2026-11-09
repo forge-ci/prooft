@@ -5,9 +5,9 @@ The rules, in order (the first that fails names the state):
 1. ``undeclared``   the gate is not in the policy.
 2. ``duplicate``    the gate is attested more than once.
 3. ``bad-stamp``    the record was edited after it was stamped.
-4. ``wrong-tree``   it proves another tree (content changed).
-5. ``wrong-parents`` it proves another history (rebased / cherry-picked).
-6. ``lane-mismatch`` the policy says another lane proves this gate.
+4. ``lane-mismatch`` the policy says another lane proves this gate.
+5. ``wrong-tree``   it proves another tree, and the lane's declared inputs changed too.
+6. ``wrong-parents`` it proves another history, and the lane's inputs changed too.
 7. ``stale``        older than the lane's ``max-age-hours``, or from the future.
 8. ``valid``        otherwise.
 
@@ -18,6 +18,7 @@ is ``valid``.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 import math
@@ -89,23 +90,37 @@ def fresh(at: float, now: float, max_age: float, skew: float = CLOCK_SKEW_SECOND
     return at > 0 and max_age > 0 and -skew <= now - at <= max_age
 
 
-def _judge(att: Attestation, declared: Gate, commit: Commit, policy: Policy, now: float | None) -> GateStatus:
+def _judge(
+    att: Attestation, declared: Gate, commit: Commit, policy: Policy, *, now: float | None, keys: Mapping[str, str]
+) -> GateStatus:
     """Rules 3-8 for one declared, first-seen attestation (``now=None`` skips the age check)."""
     if not att.intact:
         return GateStatus(att.gate, State.BAD_STAMP, "stamp does not match the record")
-    if att.tree != commit.tree:
-        return GateStatus(att.gate, State.WRONG_TREE, f"proves tree {att.tree[:12]}, commit has {commit.tree[:12]}")
-    if att.parents != commit.parents:
-        return GateStatus(att.gate, State.WRONG_PARENTS, "proved on other parents (rebased or cherry-picked)")
     if att.lane != declared.lane:
         return GateStatus(att.gate, State.LANE_MISMATCH, f"proved by lane {att.lane!r}, policy says {declared.lane!r}")
+    same_inputs = bool(att.key) and keys.get(att.lane) == att.key
+    if att.tree != commit.tree and not same_inputs:
+        return GateStatus(att.gate, State.WRONG_TREE, f"proves tree {att.tree[:12]}, commit has {commit.tree[:12]}")
+    if att.parents != commit.parents and not same_inputs:
+        return GateStatus(att.gate, State.WRONG_PARENTS, "proved on other parents (rebased or cherry-picked)")
     if now is not None and not fresh(att.at, now, policy.max_age_seconds(declared.lane)):
         return GateStatus(att.gate, State.STALE, "expired, or timestamped in the future")
-    return GateStatus(att.gate, State.VALID, f"{att.via} by lane {att.lane} on {att.host or 'unknown host'}")
+    how = "same tree" if att.tree == commit.tree and att.parents == commit.parents else "inputs unchanged"
+    return GateStatus(att.gate, State.VALID, f"{att.via} by lane {att.lane} on {att.host or 'unknown host'} ({how})")
 
 
-def verify(commit: Commit, policy: Policy, *, now: float | None = None, check_age: bool = True) -> Verdict:
+def verify(
+    commit: Commit,
+    policy: Policy,
+    *,
+    now: float | None = None,
+    check_age: bool = True,
+    keys: Mapping[str, str] | None = None,
+) -> Verdict:
+    """Judge ``commit``'s trailers. ``keys`` maps lane -> input key *computed at this commit*;
+    an attestation whose key matches is valid even on another tree (rule 4/5 relaxation)."""
     current = (time.time() if now is None else now) if check_age else None
+    lane_keys: Mapping[str, str] = keys or {}
     trailers = Trailers.parse(commit.message)
     seen: set[str] = set()
     statuses: list[GateStatus] = []
@@ -117,7 +132,7 @@ def verify(commit: Commit, policy: Policy, *, now: float | None = None, check_ag
             statuses.append(GateStatus(att.gate, State.DUPLICATE, "attested more than once"))
         else:
             seen.add(att.gate)
-            statuses.append(_judge(att, declared, commit, policy, current))
+            statuses.append(_judge(att, declared, commit, policy, now=current, keys=lane_keys))
     statuses.extend(GateStatus(g, State.MISSING, "not attested: CI runs it") for g in policy.gates if g not in seen)
     return Verdict(commit.sha, tuple(statuses), trailers.malformed)
 
