@@ -63,3 +63,11 @@ Linter pin at the time: `24362f3e60248ebe72ffd261e5585640228cbc5d`.
    the tool's own file list, as obs-rust's `lane_proof.py` does) before its
    key may authorize a skip; until then prefer exclusion lists over
    inclusion globs.
+
+## Tooling (not ci.yml policy)
+
+10. **soldr's success line drops `steps`** (porcelain schema 2, soldr#4010).
+    An attestation producer needs to know *which* steps and targets passed,
+    and on success that is exactly what the compact line removes. prooft
+    falls back to the `# --- step NAME: ... ---` headers in `log_path`.
+    Proposal for soldr: keep `steps` (names only) on the success line.
