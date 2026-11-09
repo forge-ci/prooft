@@ -40,3 +40,35 @@ entries).
 - Declare `inputs:` for every lane in `ci-attestations.yml`. Without inputs, a
   lane is tree-bound and no grouped entry beyond the first can reuse it.
 - Pools: post at most one comment per issue (each comment costs a runner).
+
+## How obs-studio's merge queue actually reuses work (read 2026-11-09)
+
+- `ci-mode` runs `ci_lint local-gate verify` (client trailers) only when
+  `github.event_name != 'merge_group'`. **Queue runs never consume client
+  attestations**; the comment cites #692 ("the queue commit is the merge
+  result, not the stamped head").
+- Queue runs instead use **hosted lane proofs** (`ci/lane_proof.py`, #699):
+  the key is the lane's input blobs, with exclusions read from
+  `local-gate.toml` at the base. The ledger is Actions artifacts named
+  `lane-proof-v1-<lane>-<key>`, uploaded by a passing trusted run.
+  This is the same idea as prooft's input keys, but the proof lives on GitHub
+  instead of in a commit trailer.
+- `lane_proof.py` runs from the merge checkout, so its trust-surface check is
+  the head's own copy. That is no weaker than the workflow file itself, which
+  `pull_request` and `merge_group` runs also take from the head. GitHub's
+  model trusts writers, and review guards both. prooft's base checkout of the
+  verifier is stricter, but only matters if `.github/` is also protected (for
+  example by CODEOWNERS).
+
+### Implication for prooft
+
+Two proof stores that answer one question: "did these exact lane inputs
+pass?". prooft should be able to read both:
+
+1. a **trailer** on the PR head (client run, input key), and
+2. a **hosted ledger entry** for the same key (a trusted CI run).
+
+The next prooft step is a `Ledger` protocol (trailers, a JSON directory, and
+GitHub artifacts by name) so that obs-studio's `lane_proof.py` can become
+`prooft queue --ledger github-artifacts` without changing its key or its
+trust rules.
