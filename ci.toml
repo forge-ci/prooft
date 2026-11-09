@@ -40,7 +40,7 @@ workflows     = { "ci.yml" = ["pull_request", "merge_group", "push:main", "workf
 actions       = ["actions/checkout", "astral-sh/setup-uv"]
 setup-uv      = { require = { save-cache = "false" } }
 tools         = ["uv", "python3", "git"]
-permissions   = { "actions: write" = ["cache-janitor"] }
+permissions   = { "actions: write" = ["cache-janitor"], "pull-requests: read" = ["verify"] }
 secrets       = []
 platform-code = ["src/prooft/platforms/**"]
 platform-selector = ""
