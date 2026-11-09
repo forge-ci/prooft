@@ -147,6 +147,27 @@ you$  prooft apply proof.json            # stamps only entries valid for YOUR HE
 `apply` judges the bundle exactly as if its trailers were already on HEAD:
 same tree and parents, or (for a lane with `inputs`) unchanged inputs.
 
+### Ledgers: hosted proofs by input key
+
+A trailer proves a lane on one commit. A **ledger** proves it for an input
+key, wherever that key turns up again: a merge-queue entry, a rebased head,
+or a PR whose author never ran the lane.
+
+```console
+prooft queue --pr-head P --queue-head Q --base B --ledger github \
+    --ledger-name 'lane-proof-v1-{lane}-{key}'     # GitHub artifacts, by name
+prooft plan --base B --ledger .prooft/ledger      # a directory of JSON files
+```
+
+The rules are the same as for trailers:
+
+- only lanes with `inputs` have a key;
+- the entry must be fresh (within the lane's `max-age-hours`);
+- an untrusted head (fork, title tag, trust-surface edit) skips nothing.
+
+A GitHub artifact also counts only if it is unexpired and its run was on a
+branch of this repository (a fork's run executes the fork's workflow).
+
 ## Simulating GitHub
 
 `prooft.sim.github.FakeGitHub` is a bare `origin` plus pull requests, CI

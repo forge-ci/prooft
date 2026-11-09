@@ -24,6 +24,7 @@ from prooft.adapters import soldr as soldr_adapter
 from prooft.attestation import Attestation, Trailers, Via, append
 from prooft.git import Commit, Git
 from prooft.keys import lane_key
+from prooft.ledger import Ledger, credit
 from prooft.platforms import host_triple
 from prooft.policy import POLICY_FILE, Policy, PolicyError
 from prooft.verify import Plan, State, Verdict, decide, verify
@@ -195,14 +196,24 @@ class Repo:
         title: str = "",
         fork: bool = False,
         now: float | None = None,
+        ledger: Ledger | None = None,
     ) -> Plan:
         """Which jobs a ``pull_request`` run on ``head`` may skip. Policy comes from ``base``."""
         policy = self.policy(base)
         trusted, why = self.trust(base, head, title=title, fork=fork)
-        verdict = verify(self.commit(head), policy, now=now, keys=self.keys(policy, head))
+        keys = self.keys(policy, head)
+        verdict = self._credit(verify(self.commit(head), policy, now=now, keys=keys), policy, keys, ledger, now)
         return decide(policy, verdict, trusted=trusted, untrusted_reason=why)
 
-    def queue(self, pr_head: str, queue_head: str, base: str, *, now: float | None = None) -> Plan:
+    @staticmethod
+    def _credit(
+        verdict: Verdict, policy: Policy, keys: Mapping[str, str], ledger: Ledger | None, now: float | None
+    ) -> Verdict:
+        return verdict if ledger is None else credit(verdict, policy, keys, ledger, now=now)
+
+    def queue(
+        self, pr_head: str, queue_head: str, base: str, *, now: float | None = None, ledger: Ledger | None = None
+    ) -> Plan:
         """Merge-queue credit for one entry of a merge group.
 
         The queue commit is new (new parents), so its own trailers never match.
@@ -231,11 +242,13 @@ class Repo:
             below, why_below = self.trust(base_sha, q.parents[0])
             if not below:
                 trusted, why = False, f"an earlier group entry: {why_below}"
+        keys = self.keys(policy, q.sha)
         if depth == 1 and q.tree == pr.tree:
-            verdict = verify(pr, policy, now=now, keys=self.keys(policy, pr.sha))
+            verdict = verify(pr, policy, now=now, keys=keys)
         else:
             as_queued = Commit(q.sha, q.tree, q.parents, pr.message)
-            verdict = verify(as_queued, policy, now=now, keys=self.keys(policy, q.sha))
+            verdict = verify(as_queued, policy, now=now, keys=keys)
+        verdict = self._credit(verdict, policy, keys, ledger, now)
         return decide(policy, verdict, trusted=trusted, untrusted_reason=why)
 
     def _queue_depth(self, q: Commit, base_sha: str, limit: int = 32) -> int | None:
