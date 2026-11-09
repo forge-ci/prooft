@@ -5,7 +5,8 @@ lanes:
   # A proof stays valid across a rebase / a moved main while these files are unchanged.
   lint:
     max-age-hours: 24
-    inputs: ["src/**", "tests/**", "ci/**", ci.py, pyproject.toml, uv.lock]
+    # ruff format also checks Markdown code blocks, so *.md is a lint input
+    inputs: ["src/**", "tests/**", "ci/**", ci.py, pyproject.toml, uv.lock, "**/*.md"]
   tests:
     max-age-hours: 24
     inputs: ["src/**", "tests/**", "ci/**", ci.py, pyproject.toml, uv.lock]

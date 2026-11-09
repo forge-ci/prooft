@@ -99,13 +99,29 @@ the jobs. `enforce` refuses the push. The strictest mode between the pushed
 commit and the remote tip (or the default branch, for a new branch) wins,
 so a branch cannot flip itself back to `shadow` to escape.
 
+## Rust: soldr
+
+```console
+$ prooft soldr                          # SOLDR_PORCELAIN=1 soldr lint rust --check
+attested rust/all/fmt
+attested rust/x86_64-unknown-linux-gnu/clippy
+attested rust/x86_64-pc-windows-msvc/clippy
+attested rust/x86_64-unknown-linux-gnu/dylint
+```
+
+soldr's one-line porcelain report lists its steps; each passed step maps to
+a gate (`fmt` -> `rust/all/fmt`, `clippy --target T` -> `rust/T/clippy`,
+bare `clippy`/`dylint` -> the host triple). Only gates the policy declares
+are stamped. A failing step stamps nothing for itself, so CI runs it.
+
 ## Python API
 
 ```python
 import prooft
 
 repo = prooft.open(".")
-repo.lane("lint").run(["soldr", "lint"])  # stamp HEAD
+repo.lane("lint").run(["ruff", "check", "."])  # run a lane, stamp its gates
+repo.soldr()  # soldr lint -> per-target Rust gates
 repo.verify().ok("python/all/fmt")  # True
 plan = repo.plan(base="origin/main", title="Add x")
 plan.skipped  # ("ci.yml:lint",)

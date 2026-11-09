@@ -52,3 +52,14 @@ Linter pin at the time: `24362f3e60248ebe72ffd261e5585640228cbc5d`.
 - The restricted-YAML rule made a zero-dependency parser practical.
 - GEN-005 (no bash entry points) pushed the repo to one `ci.py`, which is
   also what the attestation lanes call.
+
+## Found while dogfooding input keys
+
+9. **Declared inputs drift from real inputs.** prooft's lint lane declared
+   `src/**`, `tests/**`, ... but `ruff format --check .` also formats the
+   Python blocks inside `*.md`. A README-only change would have kept a
+   stale `python/all/fmt` proof valid. Caught by hand, not by a tool.
+   Proposal for GATE-007/010: an input-key lane must be audited (strace or
+   the tool's own file list, as obs-rust's `lane_proof.py` does) before its
+   key may authorize a skip; until then prefer exclusion lists over
+   inclusion globs.

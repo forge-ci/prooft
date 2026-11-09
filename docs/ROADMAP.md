@@ -42,7 +42,7 @@ rebuilding PRs that were already proven.
 
 ## Then (0.4: client builds)
 
-8. **soldr adapter**: `prooft run rust -- soldr lint` maps soldr's JSON
+8. [x] **soldr adapter**: `prooft soldr` (and `repo.soldr()`) maps soldr's porcelain JSON
    summary to per-target gates (`rust/<triple>/clippy`, `.../dylint`).
 9. **`prooft emit --json`**: a standalone attestation bundle (for tools that
    cannot amend commits, e.g. a remote build farm).
