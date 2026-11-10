@@ -165,8 +165,15 @@ The rules are the same as for trailers:
 - the entry must be fresh (within the lane's `max-age-hours`);
 - an untrusted head (fork, title tag, trust-surface edit) skips nothing.
 
-A GitHub artifact also counts only if it is unexpired and its run was on a
-branch of this repository (a fork's run executes the fork's workflow).
+A GitHub artifact also counts only if it is unexpired and was uploaded by
+the CI workflow (`.github/workflows/ci.yml` by default) on a `pull_request`
+or `merge_group` run from a branch of this repository. Any other workflow
+(a claim bot, a dispatch) can upload an artifact with the same name, so it
+proves nothing.
+
+A repository that keys its lanes its own way passes the keys in:
+`--lane-key rust-test=$(uv run ci/lane_proof.py key --lane rust-test --base B)`.
+prooft then judges only trust and freshness.
 
 ## Simulating GitHub
 

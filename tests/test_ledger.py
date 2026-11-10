@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 import time
+
+import pytest
 
 from prooft import State
 from prooft.cli import main
@@ -69,25 +72,47 @@ def test_queue_entry_credited_from_the_ledger(hub: FakeGitHub, keyed: Repo, tmp_
     assert runner.queue(pr.head, q, base, ledger=ledger).skipped == (LINT,)
 
 
-def artifact(name: str, *, expired: bool = False, fork: bool = False, created: str = "") -> dict[str, object]:
-    stamp = created or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    return {
-        "name": name,
-        "expired": expired,
-        "created_at": stamp,
-        "workflow_run": {"id": 7, "repository_id": 1, "head_repository_id": 2 if fork else 1, "head_branch": "b"},
-    }
+NAME = "lane-proof-v1-lint-k"
+NOW = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-def test_github_artifacts_trust_rules() -> None:
-    name = "lane-proof-v1-lint-k"
-    listing: dict[str, object] = {"artifacts": [artifact(name, fork=True), artifact(name, expired=True)]}
-    gh = GitHubArtifacts("o/r", name="lane-proof-v1-{lane}-{key}", fetch=lambda _url: listing)
+def fake_api(runs: dict[int, dict[str, object]], *, expired: bool = False) -> Callable[[str], object]:
+    """GitHub's artifacts listing plus one runs/<id> document per run."""
+    arts = [{"name": NAME, "expired": expired, "created_at": NOW, "workflow_run": {"id": i}} for i in runs]
+
+    def fetch(url: str) -> object:
+        if "/artifacts?" in url:
+            return {"artifacts": arts}
+        return runs[int(url.rsplit("/", 1)[1])]
+
+    return fetch
+
+
+def run(*, path: str = ".github/workflows/ci.yml", event: str = "merge_group", repo: str = "o/r") -> dict[str, object]:
+    return {"path": path, "event": event, "head_branch": "b", "head_repository": {"full_name": repo}}
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        run(path=".github/workflows/claim-bot.yaml"),  # any workflow could upload an artifact by that name
+        run(event="issue_comment"),
+        run(event="workflow_dispatch"),
+        run(repo="evil/fork"),
+    ],
+)
+def test_github_artifacts_reject_untrusted_runs(bad: dict[str, object]) -> None:
+    gh = GitHubArtifacts("o/r", name="lane-proof-v1-{lane}-{key}", fetch=fake_api({1: bad}))
     assert gh.lookup("lint", "k") is None
-    listing["artifacts"] = [artifact(name), artifact("lane-proof-v1-lint-other")]
+
+
+def test_github_artifacts_accept_a_ci_run() -> None:
+    gh = GitHubArtifacts("o/r", name="lane-proof-v1-{lane}-{key}", fetch=fake_api({1: run(repo="evil/fork"), 2: run()}))
     proof = gh.lookup("lint", "k")
-    assert proof is not None and proof.source == "run 7 on b"
+    assert proof is not None and proof.source == "run 2 (merge_group, b)"
     assert abs(proof.at - time.time()) < 120
+    expired = GitHubArtifacts("o/r", name="lane-proof-v1-{lane}-{key}", fetch=fake_api({2: run()}, expired=True))
+    assert expired.lookup("lint", "k") is None
 
 
 def test_cli_plan_with_a_ledger_dir(keyed: Repo, tmp_path: Path) -> None:  # noqa: F811
@@ -95,3 +120,16 @@ def test_cli_plan_with_a_ledger_dir(keyed: Repo, tmp_path: Path) -> None:  # noq
     commit(keyed, "src/a.py", "x = 1\n", "add a")
     DirLedger(tmp_path).record("lint", lint_key(keyed), source="main")
     assert main(["-C", str(keyed.root), "plan", "--base", base, "--ledger", str(tmp_path)]) == 0
+
+
+def test_external_lane_key_drives_the_ledger(keyed: Repo, tmp_path: Path) -> None:  # noqa: F811
+    """obs-studio keys lanes with its own lane_proof.py; prooft only judges trust and freshness."""
+    base = keyed.commit().sha
+    commit(keyed, "src/a.py", "x = 1\n", "add a")
+    DirLedger(tmp_path).record("lint", "obs-key", source="queue run")
+    assert keyed.plan(base, ledger=DirLedger(tmp_path), keys={"lint": "obs-key"}).skipped == (LINT,)
+    assert keyed.plan(base, ledger=DirLedger(tmp_path), keys={"lint": "other"}).skipped == ()
+    args = ["-C", str(keyed.root), "plan", "--base", base, "--ledger", str(tmp_path), "--json"]
+    assert main([*args, "--lane-key", "lint=obs-key"]) == 0
+    with pytest.raises(SystemExit, match="LANE=KEY"):
+        main([*args, "--lane-key", "nokey"])

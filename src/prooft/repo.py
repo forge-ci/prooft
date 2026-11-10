@@ -197,11 +197,16 @@ class Repo:
         fork: bool = False,
         now: float | None = None,
         ledger: Ledger | None = None,
+        keys: Mapping[str, str] | None = None,
     ) -> Plan:
-        """Which jobs a ``pull_request`` run on ``head`` may skip. Policy comes from ``base``."""
+        """Which jobs a ``pull_request`` run on ``head`` may skip. Policy comes from ``base``.
+
+        ``keys`` overrides the input key of named lanes (a repository that
+        keys its lanes its own way, e.g. obs-studio's ``lane_proof.py key``).
+        """
         policy = self.policy(base)
         trusted, why = self.trust(base, head, title=title, fork=fork)
-        keys = self.keys(policy, head)
+        keys = {**self.keys(policy, head), **(keys or {})}
         verdict = self._credit(verify(self.commit(head), policy, now=now, keys=keys), policy, keys, ledger, now)
         return decide(policy, verdict, trusted=trusted, untrusted_reason=why)
 
@@ -212,7 +217,14 @@ class Repo:
         return verdict if ledger is None else credit(verdict, policy, keys, ledger, now=now)
 
     def queue(
-        self, pr_head: str, queue_head: str, base: str, *, now: float | None = None, ledger: Ledger | None = None
+        self,
+        pr_head: str,
+        queue_head: str,
+        base: str,
+        *,
+        now: float | None = None,
+        ledger: Ledger | None = None,
+        keys: Mapping[str, str] | None = None,
     ) -> Plan:
         """Merge-queue credit for one entry of a merge group.
 
@@ -242,7 +254,7 @@ class Repo:
             below, why_below = self.trust(base_sha, q.parents[0])
             if not below:
                 trusted, why = False, f"an earlier group entry: {why_below}"
-        keys = self.keys(policy, q.sha)
+        keys = {**self.keys(policy, q.sha), **(keys or {})}
         if depth == 1 and q.tree == pr.tree:
             verdict = verify(pr, policy, now=now, keys=keys)
         else:
