@@ -1,6 +1,6 @@
 [project]
 name = "prooft"
-version = "0.1.0"
+version = "0.2.0"
 description = "Proof marks for client builds: stamp local lint/test passes into commit trailers so CI and the merge queue skip what is already proven."
 readme = "README.md"
 requires-python = ">=3.10"
