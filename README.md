@@ -196,7 +196,7 @@ fork, title tag, policy edit, forged pass, queue credit and queue rerun.
 Alpha (0.2). prooft's own PRs skip `fast` and `test-linux-x64` when their trailers prove them.
 The merge queue credits every entry of a multi-PR group whose lane inputs are unchanged, and it reads hosted proofs
 (`--ledger`) under the same trust rules. The real-world case is obs-rust/obs-studio ([docs/CASE-OBS-RUST.md](docs/CASE-OBS-RUST.md),
-obs-rust/obs-studio#4460). Next: a `ci-lint` adapter.
+obs-rust/obs-studio#4460). Next: a `ci-lint` adapter. See
 [docs/ROADMAP.md](docs/ROADMAP.md).
 
 License: BSD-3-Clause.
