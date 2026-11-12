@@ -25,7 +25,7 @@ from prooft.miniyaml import MiniYamlError, parse
 
 POLICY_FILE = "ci-attestations.yml"
 DEFAULT_MAX_AGE_HOURS = 24.0
-ECOSYSTEMS = ("rust", "python", "cpp", "general")
+ECOSYSTEMS = ("rust", "python", "cpp", "general", "data", "swift")
 FIDELITIES = ("native", "vm", "emulation")
 MODES = ("shadow", "enforce")  # shadow: an unattested push warns; enforce: the pre-push hook refuses it
 
