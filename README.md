@@ -77,6 +77,13 @@ It is a restricted YAML subset (no anchors, aliases, tags or block scalars)
 parsed by the standard library alone, so every host reads it the same way.
 `fidelity: emulation` (Wine, Darling) may prove `unit`, never `test`.
 
+Supported gate ecosystems are `rust`, `python`, `cpp`, `general`, `data`
+and `swift`. For example, data validation can declare `data/all/qt-xml`,
+and Swift formatting can declare `swift/all/fmt`. Like `general`, these
+use the lane command you supply to `prooft run`; the ecosystem does not
+select a tool. All ecosystems share the default native fidelity and
+24-hour proof lifetime unless the policy overrides them.
+
 ## Command line
 
 ```text

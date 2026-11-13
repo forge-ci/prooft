@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from prooft.miniyaml import MiniYamlError, parse
 from prooft.policy import Policy, PolicyError
+from prooft.repo import Repo
+from tests.conftest import commit
 
 GOOD = """\
 version: 1   # comment
@@ -24,6 +28,39 @@ def test_parse_good_policy() -> None:
     assert policy.jobs == {"ci.yml:fast": ("rust/all/fmt",)}
     assert policy.max_age_seconds("rust") == 12 * 3600
     assert policy.max_age_seconds("wine") == 24 * 3600
+
+
+def test_load_data_and_swift_policy(tmp_path: Path) -> None:
+    text = """\
+version: 1
+gates:
+  data/all/flatpak-manifest: {lane: data}
+  data/all/qt-xml: {lane: data}
+  data/all/compatibility: {lane: data}
+  data/all/services-schema: {lane: data}
+  swift/all/fmt: {lane: swift}
+jobs:
+  ci.yml:data: [data/all/flatpak-manifest, data/all/qt-xml, data/all/compatibility, data/all/services-schema]
+  ci.yml:swift: [swift/all/fmt]
+"""
+    (tmp_path / "ci-attestations.yml").write_text(text, encoding="utf-8")
+    policy = Policy.load(tmp_path)
+    assert policy.lanes == ("data", "swift")
+    assert policy.jobs["ci.yml:data"] == tuple(gate.path for gate in policy.lane_gates("data"))
+    assert policy.jobs["ci.yml:swift"] == ("swift/all/fmt",)
+    for lane in policy.lanes:
+        assert policy.max_age_seconds(lane) == 24 * 3600
+        assert all(gate.ecosystem == lane and gate.fidelity == "native" for gate in policy.lane_gates(lane))
+
+
+@pytest.mark.parametrize("gate", ["data/all/qt-xml", "swift/all/fmt", "cpp/all/fmt", "general/all/lint"])
+def test_ecosystem_lane_attests_and_skips_job(dev: Repo, gate: str) -> None:
+    text = f"version: 1\ngates:\n  {gate}: {{lane: checks}}\njobs:\n  ci.yml:checks: [{gate}]\n"
+    base = commit(dev, "ci-attestations.yml", text, "declare checks")
+    commit(dev, "README.txt", "check this commit\n", "change inputs")
+    dev.lane("checks").run(["git", "--version"])
+    assert dev.verify().ok(gate)
+    assert dev.plan(base).skipped == ("ci.yml:checks",)
 
 
 @pytest.mark.parametrize(
