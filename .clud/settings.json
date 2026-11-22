@@ -1,0 +1,7 @@
+{
+  "pr_checks": {
+    "commands": [
+      "uv run --frozen python ci.py fmt lint types"
+    ]
+  }
+}
