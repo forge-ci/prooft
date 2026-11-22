@@ -229,3 +229,39 @@ def test_worktree_tree_matches_head_tree_when_clean(repo: Repo) -> None:
     assert repo.git.worktree_tree() != repo.commit().tree
     assert Path(repo.root / "new.txt").exists()
     assert "new.txt" not in repo.git.run("diff", "--cached", "--name-only")
+
+
+# ── a lane that is itself an attester (ci-lint local-gate run) ──────────
+
+
+AMEND = """\
+import subprocess, sys
+msg = subprocess.run(["git", "log", "-1", "--format=%B"], capture_output=True, text=True).stdout
+if sys.argv[1] == "message":
+    subprocess.run(["git", "commit", "-q", "--amend", "-m", msg.rstrip() + "\\n\\nLocal-Gate: tree=x"], check=True)
+else:
+    open("extra.txt", "w").write("x")
+    subprocess.run(["git", "add", "extra.txt"], check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "sneaky"], check=True)
+"""
+
+
+def _amend_policy(repo: Repo, mode: str) -> None:
+    (repo.root / "amend.py").write_text(AMEND, encoding="utf-8")
+    lane = f"  lint:\n    run: [{sys.executable}, amend.py, {mode}]\n"
+    policy = f"version: 1\nlanes:\n{lane}gates:\n  python/all/lint: {{lane: lint}}\n"
+    commit(repo, "ci-attestations.yml", policy, "amending lane")
+
+
+def test_a_lane_may_amend_only_the_message_and_its_trailer_survives(repo: Repo) -> None:
+    _amend_policy(repo, "message")
+    assert go(repo) == 0
+    message = repo.commit().message
+    assert "Local-Gate: tree=x" in message
+    assert repo.verify().ok("python/all/lint")
+
+
+def test_a_lane_that_commits_new_content_is_refused(repo: Repo) -> None:
+    _amend_policy(repo, "content")
+    with pytest.raises(RuntimeError, match="changed HEAD"):
+        go(repo)
