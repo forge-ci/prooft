@@ -124,16 +124,16 @@ class Repo:
             raise RuntimeError("unknown host triple: pass host=...")
         if not self.git.is_clean():
             raise RuntimeError("working tree is dirty: commit first, prooft attests commits")
-        before = self.commit().sha
+        before = self.commit()
         env = {**os.environ, "SOLDR_PORCELAIN": "1", "CI": "true"}
         started = time.monotonic()
         proc = subprocess.run(list(command), cwd=self.root, env=env, capture_output=True, text=True, check=False)
         secs = int(time.monotonic() - started)
         sys.stderr.write(proc.stderr)
-        if self.commit().sha != before or not self.git.is_clean():
+        if not same_content(before, self.commit()) or not self.git.is_clean():
             raise RuntimeError("soldr changed HEAD or tracked files; nothing was attested")
         gates = soldr_adapter.proven_gates(proc.stdout, triple, frozenset(policy.gates))
-        sha = self.stamp(gates, policy=policy, secs=secs) if gates else before
+        sha = self.stamp(gates, policy=policy, secs=secs) if gates else self.commit().sha
         return SoldrRun(sha=sha, gates=gates, exit_code=proc.returncode)
 
     def emit(self, rev: str = "HEAD", *, policy: Policy | None = None) -> dict[str, object]:
@@ -309,13 +309,25 @@ class LaneRun:
         if code != 0:
             raise LaneFailed(self.name, code)
         after = self.repo.commit()
-        if after.sha != before.sha or not self.repo.git.is_clean():
+        if not same_content(before, after) or not self.repo.git.is_clean():
             raise RuntimeError(f"lane {self.name!r} changed HEAD or tracked files; nothing was attested")
         return self.record(secs=secs, key=key)
 
     def record(self, *, secs: int | None = None, key: str = "", via: Via = "run", at: int | None = None) -> str:
         """Stamp HEAD for every gate of this lane without running anything (the caller ran it)."""
         return self.repo.stamp(self.gates, policy=self.policy, secs=secs, key=key, via=via, at=at)
+
+
+def same_content(before: Commit, after: Commit) -> bool:
+    """HEAD still holds the same bytes on the same parents.
+
+    A lane may rewrite HEAD's *message*: another attester (``ci-lint
+    local-gate run`` writing its ``Local-Gate:`` trailer) amends the commit
+    without changing what it proves. prooft then stamps the amended HEAD, and
+    the other trailers survive. A new tree or new parents is a new commit
+    nobody linted, so it is refused.
+    """
+    return before.tree == after.tree and before.parents == after.parents
 
 
 def open(path: str | Path = ".") -> Repo:  # noqa: A001 - fluent `prooft.open(...)`
