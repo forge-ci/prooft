@@ -265,3 +265,31 @@ def test_a_lane_that_commits_new_content_is_refused(repo: Repo) -> None:
     _amend_policy(repo, "content")
     with pytest.raises(RuntimeError, match="changed HEAD"):
         go(repo)
+
+
+# ── push pins the attested commit; the PR lives where the branch went ────
+
+
+def test_push_names_the_attested_sha_not_head() -> None:
+    argv = ("git", "push", "--force-with-lease", "-u", "origin", "HEAD:refs/heads/feature")
+    assert runner._pinned_push(argv, "abc123")[-1] == "abc123:refs/heads/feature"  # pyright: ignore[reportPrivateUsage]
+
+
+def test_push_refuses_when_head_bytes_moved_after_the_lanes(repo: Repo) -> None:
+    step = runner.Step("push", "", ("git", "push", "origin", "HEAD:refs/heads/feature"))
+    with pytest.raises(runner.Refused, match="HEAD changed"):
+        runner._push(repo, step, "0" * 40)  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.parametrize(
+    ("url", "want"),
+    [
+        ("https://github.com/forge-ci/prooft.git", "forge-ci/prooft"),
+        ("git@github.com:FastLED/cli.git", "FastLED/cli"),
+        ("ssh://git@github.com/FastLED/cli", "FastLED/cli"),
+        ("https://ghe.example.com/team/tool.git", "ghe.example.com/team/tool"),
+        ("/srv/git/bare.git", None),
+    ],
+)
+def test_gh_repo_reads_the_pushed_remote(url: str, want: str | None) -> None:
+    assert runner.gh_repo(url) == want
