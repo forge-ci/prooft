@@ -1,5 +1,8 @@
 """``prooft`` command line.
 
+    prooft [--test] [--push] [--no-pr] [--no-lint]
+                                     the runner: lint (assumed), then tests, then push and PR
+    prooft check-build               exit 0 only when lint passed on the working tree, else 3
     prooft run LANE -- CMD...        run CMD; on success stamp HEAD for LANE's gates
     prooft verify [REV]              show every gate's state on REV (default HEAD)
     prooft plan --base REV [--head REV] [--title T] [--fork] [--github-output]
@@ -11,7 +14,8 @@
     prooft hook install [--force]    install the pre-push hook
     prooft check-push                what the hook runs (git pre-push stdin)
 
-Exit codes: 0 ok, 1 a check failed / something must run, 2 usage or policy error.
+Exit codes: 0 ok, 1 a check failed / something must run, 2 usage or policy error,
+3 refused (the runner, check-build).
 """
 
 from __future__ import annotations
@@ -24,7 +28,7 @@ from pathlib import Path
 import sys
 
 import prooft
-from prooft import hook
+from prooft import hook, runner
 from prooft.ledger import DEFAULT_NAME, DirLedger, GitHubArtifacts, Ledger
 from prooft.policy import PolicyError
 from prooft.verify import Plan
@@ -172,7 +176,14 @@ def _cmd_check_push(repo: prooft.Repo, _: argparse.Namespace) -> int:
     return 0 if result.ok else 1
 
 
+def _cmd_check_build(repo: prooft.Repo, _: argparse.Namespace) -> int:
+    ok, message = runner.check_build(repo)
+    print(message, file=sys.stdout if ok else sys.stderr)
+    return 0 if ok else 3
+
+
 COMMANDS = {
+    "check-build": _cmd_check_build,
     "run": _cmd_run,
     "verify": _cmd_verify,
     "lanes": _cmd_lanes,
@@ -243,13 +254,37 @@ def _parser() -> argparse.ArgumentParser:
     p_hook.add_argument("action", choices=["install"])
     p_hook.add_argument("--force", action="store_true", help="replace a custom hook (saved as pre-push.pre-prooft)")
 
+    sub.add_parser("check-build", help="exit 0 only when lint passed on the working tree (else 3)")
+
     p_check = sub.add_parser("check-push", help="pre-push check (reads git pre-push lines on stdin)")
     p_check.add_argument("remote", nargs="?")
     p_check.add_argument("url", nargs="?")
     return parser
 
 
+def _is_runner(argv: Sequence[str]) -> bool:
+    """No subcommand: ``prooft``, ``prooft --test``, ``prooft -C DIR --push``."""
+    rest = list(argv)
+    if rest[:1] == ["-C"]:
+        rest = rest[2:]
+    elif rest[:1] and rest[0].startswith("-C"):
+        rest = rest[1:]
+    if not rest:
+        return True
+    return rest[0].startswith("-") and rest[0] not in ("-h", "--help", "--version")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if _is_runner(argv):
+        try:
+            return runner.main(argv, prooft.open)
+        except prooft.LaneFailed as exc:
+            print(f"prooft: {exc}", file=sys.stderr)
+            return 1
+        except (PolicyError, RuntimeError, ValueError, FileNotFoundError) as exc:
+            print(f"prooft: {exc}", file=sys.stderr)
+            return 2
     args = _parser().parse_args(argv)
     try:
         return COMMANDS[args.command](prooft.open(args.path), args)

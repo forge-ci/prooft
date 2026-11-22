@@ -4,7 +4,10 @@ Read from ``ci-attestations.yml`` (the GATE-010 definition file):
 
     version: 1
     lanes:                                  # optional (prooft extension)
-      rust: {max-age-hours: 24}
+      rust: {max-age-hours: 24, run: soldr}  # `run`: what the bare `prooft` runner executes
+      tests:                                # `stage`: lint | test (inferred from the gates)
+        stage: test
+        run: [soldr, cargo, test, --workspace]
     gates:
       rust/all/fmt: {lane: rust}
       rust/x86_64-unknown-linux-gnu/test: {lane: tests}
@@ -27,6 +30,11 @@ POLICY_FILE = "ci-attestations.yml"
 DEFAULT_MAX_AGE_HOURS = 24.0
 ECOSYSTEMS = ("rust", "python", "cpp", "general", "data", "swift")
 FIDELITIES = ("native", "vm", "emulation")
+STAGES = ("lint", "test")
+#: Checks that make a lane a lint lane when it declares no ``stage``.
+LINT_CHECKS = frozenset({"fmt", "lint", "clippy", "dylint", "types", "check", "static"})
+#: ``run: soldr`` runs ``soldr lint`` in porcelain mode and stamps the Rust gates it proved.
+SOLDR_RUN = ("soldr", "lint")
 MODES = ("shadow", "enforce")  # shadow: an unattested push warns; enforce: the pre-push hook refuses it
 
 _GATE = re.compile(r"^(?P<eco>[a-z]+)/(?P<platform>[A-Za-z0-9_.-]+)/(?P<check>[a-z0-9][a-z0-9-]*)$")
@@ -65,6 +73,10 @@ class Policy:
     mode: str = "shadow"
     #: lane -> input globs. A lane with inputs gets an input key (see keys.py).
     inputs: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
+    #: lane -> the argv the runner executes (``SOLDR_RUN`` for ``run: soldr``), in declaration order.
+    runs: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
+    #: lane -> declared stage; see ``stage()`` for the inferred default.
+    stages: dict[str, str] = field(default_factory=dict[str, str])
 
     # ── loading ──────────────────────────────────────────────────────────
 
@@ -95,7 +107,7 @@ class Policy:
         if mode not in MODES:
             problems.append(f"mode must be one of {', '.join(MODES)}")
         mode = str(mode)
-        max_age, inputs = _lanes(doc.get("lanes"), problems)
+        max_age, inputs, runs, stages = _lanes(doc.get("lanes"), problems)
 
         gates: dict[str, Gate] = {}
         for gate_path, spec in _mapping(doc.get("gates"), "gates", problems).items():
@@ -130,9 +142,12 @@ class Policy:
                 if name not in gates:
                     problems.append(f"job {job}: gate {name} is not declared under 'gates'")
             jobs[job] = names
+        for lane in runs:
+            if not any(g.lane == lane for g in gates.values()):
+                problems.append(f"lanes.{lane}.run: the lane proves no gate, so running it attests nothing")
         if problems:
             raise PolicyError([f"{source}: {p}" for p in problems])
-        return cls(gates, jobs, max_age, source, mode, inputs)
+        return cls(gates, jobs, max_age, source, mode, inputs, runs, stages)
 
     # ── queries ──────────────────────────────────────────────────────────
 
@@ -142,6 +157,17 @@ class Policy:
     @property
     def lanes(self) -> tuple[str, ...]:
         return tuple(sorted({g.lane for g in self.gates.values()}))
+
+    def stage(self, lane: str) -> str:
+        """``lint`` or ``test``: declared, else lint when every gate of the lane is a lint check."""
+        if lane in self.stages:
+            return self.stages[lane]
+        gates = self.lane_gates(lane)
+        return "lint" if gates and all(g.check in LINT_CHECKS for g in gates) else "test"
+
+    def runnable(self, stage: str) -> tuple[str, ...]:
+        """Lanes of ``stage`` that declare a ``run`` command, in declaration order."""
+        return tuple(lane for lane in self.runs if self.stage(lane) == stage)
 
     def max_age_seconds(self, lane: str) -> float:
         return self.max_age_hours.get(lane, DEFAULT_MAX_AGE_HOURS) * 3600
@@ -165,12 +191,35 @@ def _mapping(value: object, where: str, problems: list[str]) -> dict[str, object
     return value  # pyright: ignore[reportUnknownVariableType]
 
 
-def _lanes(value: object, problems: list[str]) -> tuple[dict[str, float], dict[str, tuple[str, ...]]]:
+_LaneTables = tuple[dict[str, float], dict[str, tuple[str, ...]], dict[str, tuple[str, ...]], dict[str, str]]
+
+
+def _run(lane: str, value: object, problems: list[str]) -> tuple[str, ...] | None:
+    if value == "soldr":
+        return SOLDR_RUN
+    if isinstance(value, list) and value and all(isinstance(a, str) and a for a in value):  # pyright: ignore[reportUnknownVariableType]
+        return tuple(str(a) for a in value)  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
+    problems.append(f"lanes.{lane}.run must be `soldr` or a non-empty argv list of strings")
+    return None
+
+
+def _lanes(value: object, problems: list[str]) -> _LaneTables:
     max_age: dict[str, float] = {}
     inputs: dict[str, tuple[str, ...]] = {}
+    runs: dict[str, tuple[str, ...]] = {}
+    stages: dict[str, str] = {}
     for lane, spec in _mapping(value, "lanes", problems).items():
         spec_map = _mapping(spec, f"lanes.{lane}", problems)
-        unknown = set(spec_map) - {"max-age-hours", "inputs"}
+        if "run" in spec_map:
+            argv = _run(lane, spec_map["run"], problems)
+            if argv is not None:
+                runs[lane] = argv
+        if "stage" in spec_map:
+            if spec_map["stage"] in STAGES:
+                stages[lane] = str(spec_map["stage"])
+            else:
+                problems.append(f"lanes.{lane}.stage must be one of {', '.join(STAGES)}")
+        unknown = set(spec_map) - {"max-age-hours", "inputs", "run", "stage"}
         if unknown:
             problems.append(f"lanes.{lane}: unknown keys {', '.join(sorted(unknown))}")
         hours = spec_map.get("max-age-hours", DEFAULT_MAX_AGE_HOURS)
@@ -185,4 +234,4 @@ def _lanes(value: object, problems: list[str]) -> tuple[dict[str, float], dict[s
             problems.append(f"lanes.{lane}.inputs must be a non-empty list of glob strings")
         else:
             inputs[lane] = tuple(str(g) for g in globs)  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
-    return max_age, inputs
+    return max_age, inputs, runs, stages

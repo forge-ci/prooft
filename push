@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# Publish this branch through the prooft runner (forge-ci/ci.yml GATE-014):
+# lint first, `--test` adds the test lane, then push with a lease and open or reuse the PR.
+exec uv run --frozen python -m prooft.cli --push "$@"
