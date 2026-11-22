@@ -73,12 +73,16 @@ def test_queue_entry_credited_from_the_ledger(hub: FakeGitHub, keyed: Repo, tmp_
 
 
 NAME = "lane-proof-v1-lint-k"
-NOW = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def now() -> str:
+    """Stamped per fake listing, not at import: a slow suite must not age the artifact."""
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
 def fake_api(runs: dict[int, dict[str, object]], *, expired: bool = False) -> Callable[[str], object]:
     """GitHub's artifacts listing plus one runs/<id> document per run."""
-    arts = [{"name": NAME, "expired": expired, "created_at": NOW, "workflow_run": {"id": i}} for i in runs]
+    arts = [{"name": NAME, "expired": expired, "created_at": now(), "workflow_run": {"id": i}} for i in runs]
 
     def fetch(url: str) -> object:
         if "/artifacts?" in url:

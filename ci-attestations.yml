@@ -3,11 +3,14 @@ version: 1
 mode: shadow
 lanes:
   # A proof stays valid across a rebase / a moved main while these files are unchanged.
+  # `run`: what the bare `prooft` runner executes; lint runs before tests.
   lint:
+    run: [python, ci.py, fmt, lint, types]
     max-age-hours: 24
     # ruff format also checks Markdown code blocks, so *.md is a lint input
     inputs: ["src/**", "tests/**", "ci/**", ci.py, pyproject.toml, uv.lock, "**/*.md"]
   tests:
+    run: [python, ci.py, test]
     max-age-hours: 24
     inputs: ["src/**", "tests/**", "ci/**", ci.py, pyproject.toml, uv.lock]
 gates:

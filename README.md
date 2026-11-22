@@ -84,6 +84,49 @@ use the lane command you supply to `prooft run`; the ecosystem does not
 select a tool. All ecosystems share the default native fidelity and
 24-hour proof lifetime unless the policy overrides them.
 
+## The runner: `prooft`
+
+Run with no subcommand, prooft is the repository's gate runner, and `./push`
+delegates to it (`exec prooft --push "$@"`, ci.yml GATE-014):
+
+```text
+prooft                  lint: run every lint-stage lane; stamp HEAD when the tree is clean
+prooft --test           lint, then every test-stage lane
+prooft --push           lint (and --test), then git push --force-with-lease and open or reuse the PR
+prooft --no-pr          with --push: push only
+prooft --no-lint ...    skip lint. Discouraged: nothing is attested for lint and builds stay refused
+prooft --dry-run        print the steps in order and run nothing
+prooft check-build      exit 0 only when lint passed on the current working tree, else 3
+```
+
+A lane is runnable when it declares `run:`. `run: soldr` is `soldr lint` in
+porcelain mode, stamping each Rust gate whose step passed; anything else is
+an argv list (block style: `run: [./lint]` under the lane's own key). Its
+`stage` is `lint` or `test`; when it is not declared, a lane whose gates are
+all lint checks (`fmt`, `lint`, `clippy`, `dylint`, `types`, `check`,
+`static`) is a lint lane and any other is a test lane.
+
+```yaml
+lanes:
+  rust: {run: soldr}
+  tests:
+    run: [soldr, cargo, test, --workspace]
+```
+
+**Lint always runs first.** It fails in seconds on a warm cache, while tests
+build and run the whole project, so a lint failure stops the runner before
+any test starts. A lane already attested on HEAD is not rerun.
+
+**No build before lint (ci.yml GATE-017).** Every lint pass is also recorded
+in `.git/prooft/lint-passes` against the *working tree* (the tree `git add -A`
+would commit), dirty or not. `prooft check-build` answers whether the bytes
+about to be built were linted, so a build wrapper or an agent's command
+scanner can refuse `cargo build`/`cargo test` with instructions to run
+`prooft` first. A dirty tree is linted but not attested: attestations stamp
+commits. `--push` refuses a dirty tree, a detached HEAD and the base branch.
+
+Exit codes: 0 ok, 1 a lane failed, 2 usage or policy error, 3 refused.
+
 ## Command line
 
 ```text
