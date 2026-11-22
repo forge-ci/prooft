@@ -12,7 +12,7 @@ from prooft.policy import POLICY_FILE, Gate, Policy, PolicyError
 from prooft.repo import LaneFailed, LaneRun, Repo, open  # noqa: A004 - fluent `prooft.open(...)`
 from prooft.verify import JobDecision, Plan, State, Verdict, decide, verify
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
 __all__ = [
     "POLICY_FILE",

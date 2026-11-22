@@ -28,6 +28,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -180,15 +181,44 @@ def _run_lane(repo: Repo, policy: Policy, step: Step) -> str:
     return f"{step.stage} {step.lane}: attested on {sha[:12]}"
 
 
-def _push(repo: Repo, step: Step) -> None:
-    code = subprocess.run(list(step.argv), cwd=repo.root, check=False).returncode
+def _pinned_push(argv: Sequence[str], sha: str) -> list[str]:
+    """Push the attested commit by SHA, never whatever ``HEAD`` names at push time."""
+    return [f"{sha}:{a[len('HEAD:') :]}" if a.startswith("HEAD:") else a for a in argv]
+
+
+def _push(repo: Repo, step: Step, tree: str) -> str:
+    """Push the commit the lanes attested; refuse if HEAD's bytes moved since lint."""
+    head = repo.commit()
+    if head.tree != tree:
+        raise Refused("HEAD changed after the lanes ran; rerun prooft to attest it")
+    code = subprocess.run(_pinned_push(step.argv, head.sha), cwd=repo.root, check=False).returncode
     if code != 0:
         raise LaneFailed("push", code)
+    return head.sha
 
 
-def _pr(repo: Repo, step: Step, branch: str) -> str:
+def gh_repo(url: str) -> str | None:
+    """``OWNER/REPO`` (``HOST/OWNER/REPO`` off github.com) from a remote URL, else None."""
+    m = re.match(r"^(?:[a-z+]+://)?(?:[^@/]+@)?([^/:]+)[:/]([^/]+)/([^/]+?)(?:\.git)?/?$", url.strip())
+    if not m:
+        return None
+    host, owner, name = m.groups()
+    return f"{owner}/{name}" if host == "github.com" else f"{host}/{owner}/{name}"
+
+
+def _remote_repo(repo: Repo, remote: str) -> list[str]:
+    try:
+        found = gh_repo(repo.git.run("remote", "get-url", remote))
+    except GitError:
+        return []
+    return ["--repo", found] if found else []
+
+
+def _pr(repo: Repo, step: Step, branch: str, remote: str) -> str:
+    """Reuse or open the PR in the repository the branch was pushed to, not ``GH_REPO``'s."""
+    where = _remote_repo(repo, remote)
     found = subprocess.run(
-        ["gh", "pr", "view", branch, "--json", "url", "-q", ".url"],
+        ["gh", "pr", "view", branch, *where, "--json", "url", "-q", ".url"],
         cwd=repo.root,
         capture_output=True,
         text=True,
@@ -196,7 +226,7 @@ def _pr(repo: Repo, step: Step, branch: str) -> str:
     )
     if found.returncode == 0 and found.stdout.strip():
         return f"pr: {found.stdout.strip()} (existing)"
-    code = subprocess.run(list(step.argv), cwd=repo.root, check=False).returncode
+    code = subprocess.run([*step.argv, *where], cwd=repo.root, check=False).returncode
     if code != 0:
         raise LaneFailed("pr", code)
     return "pr: opened"
@@ -224,10 +254,10 @@ def run(repo: Repo, opts: Options, *, out: TextIO | None = None) -> int:
     last_lint = max((i for i, s in enumerate(steps) if s.stage == "lint"), default=-1)
     for i, step in enumerate(steps):
         if step.stage == "push":
-            _push(repo, step)
-            say(f"pushed {branch}")
+            sha = _push(repo, step, tree)
+            say(f"pushed {sha[:12]} to {branch}")
         elif step.stage == "pr":
-            say(_pr(repo, step, str(branch)))
+            say(_pr(repo, step, str(branch), opts.remote))
         else:
             say(_run_lane(repo, policy, step))
         if i == last_lint:
